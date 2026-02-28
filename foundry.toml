@@ -1,0 +1,12 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+
+evm_version = "cancun"
+optimizer_runs = 800
+via_ir = true
+ffi = true
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"

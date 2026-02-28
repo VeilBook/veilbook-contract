@@ -1,0 +1,39 @@
+// todo
+install zama dependencies and hook dependencies
+contract and test on hardhat
+hardhat hook....deploycodeto...
+
+match two orders - a buy and sell other at the same tick
+
+
+// test folder is for foundry testing
+// script folder is for foundry (deploy and write scripts for operations (in fork environment))
+
+
+// deploy contracts on deploy/ folder
+// use addresses and write script to do tasks/operations in scripts
+
+
+forge install uniswap/v4-periphery --shallow --no-git 
+forge install https://github.com/akshatmittal/hookmate --shallow --no-git
+forge install uniswap/universal-router --shallow --no-git
+forge install uniswap/v2-core uniswap/v3-core  --shallow --no-git
+
+forge test test/YourContract.t.sol
+forge test test/Pool.t.sol
+forge test test/Liquidity.t.sol
+
+forge script script/DeployYourContract.s.sol 
+forge script script/Deploy.s.sol --broadcast --private-key $PRIVATE_KEY
+
+
+npx hardhat test tests/myTest.ts
+
+
+npx hardhat run scripts/deployYourContract.ts
+npx hardhat run scripts/deploy.ts (set fork url on hardhat config)
+npx hardhat run scripts/deploy.ts --network sepolia
+
+
+solc_version = "0.8.27"
+
