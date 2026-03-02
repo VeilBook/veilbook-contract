@@ -287,6 +287,7 @@ contract VeilBook is
         externalEuint64 encAmountIn,
         bytes calldata amountInProof
     ) external nonReentrant returns (bytes32 orderId) {
+
         int24 usableTick = _roundTickDown(tick, key.tickSpacing);
         PoolId poolId = key.toId();
 
@@ -306,9 +307,9 @@ contract VeilBook is
 
         );
 
-        // Buyer  (zeroForOne=true)  deposits currency1
-        // Seller (zeroForOne=false) deposits currency0
-        Currency depositCurrency = zeroForOne ? key.currency1 : key.currency0;
+        // Buyer  (zeroForOne=true)  deposits currency0
+        // Seller (zeroForOne=false) deposits currency1
+        Currency depositCurrency = zeroForOne ? key.currency0 : key.currency1;
         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][depositCurrency];
         if (address(encToken) == address(0)) revert PoolNotInitialized();
 
@@ -373,7 +374,7 @@ contract VeilBook is
         PoolId poolId = key.toId();
 
         // Deposit currency = what they originally locked
-        Currency depositCurrency = order.zeroForOne ? key.currency1 : key.currency0;
+        Currency depositCurrency = order.zeroForOne ? key.currency0 : key.currency1;
         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][depositCurrency];
 
         // Re-encrypt, burn, refund
@@ -416,7 +417,7 @@ contract VeilBook is
         // Outgoing = opposite of deposit currency
         // Buyer  (zeroForOne=true)  deposited currency1 → receives currency0
         // Seller (zeroForOne=false) deposited currency0 → receives currency1
-        Currency outCurrency = order.zeroForOne ? key.currency0 : key.currency1;
+        Currency outCurrency = order.zeroForOne ? key.currency1 : key.currency0;
         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][outCurrency];
 
         // Re-encrypt, burn, send
@@ -460,8 +461,9 @@ contract VeilBook is
         PoolKey calldata key,
         int24 tick
     ) internal {
-        bytes32[] storage buyOrders  = orderBook[poolId][tick][true];
-        bytes32[] storage sellOrders = orderBook[poolId][tick][false];
+        
+        bytes32[] storage sellOrders = orderBook[poolId][tick][true];   // selling token0
+        bytes32[] storage buyOrders  = orderBook[poolId][tick][false];  // selling token1
 
         if (buyOrders.length == 0 || sellOrders.length == 0) return;
 
@@ -520,9 +522,11 @@ contract VeilBook is
             buy.filledOut  = newBuyFilledOut;
 
             // ── Token transfers ───────────────────────────────────────────
-            // Seller locked currency0 → buyer receives it
-            encToken0.hookTransfer(address(this), buy.owner,  fillIn);
-            // Buyer locked currency1  → seller receives it
+
+            // Seller (zeroForOne=true) locked currency0 → buyer receives currency0
+            encToken0.hookTransfer(address(this), buy.owner, fillIn);
+
+            // Buyer (zeroForOne=false) locked currency1 → seller receives currency1
             encToken1.hookTransfer(address(this), sell.owner, fillOut);
 
             emit OrderTypes.OrdersMatched(buyOrders[bi], sellOrders[si], tick);
