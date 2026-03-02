@@ -1,7 +1,8 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, fhevm, network } from "hardhat";
 import { Contract, Signer, ZeroAddress } from "ethers";
-import type { MockERC20, VeilBook } from "../types";
+import type { MockERC20, VeilBook, PoolEncryptedToken, PoolEncryptedToken__factory } from "../types";
+import { FhevmType } from "@fhevm/hardhat-plugin";
 
 // ── Uniswap V4 ABIs we need ───────────────────────────────────────────────────
 const POOL_MANAGER_ABI = [
@@ -29,9 +30,6 @@ const SQRT_PRICE_1_1 = "79228162514264337593543950336";
 const MIN_SQRT_PRICE = BigInt("4295128739");
 const MAX_SQRT_PRICE = BigInt("1461446703485210103287273052203988822378723970341");
 
-// Hook flags — must match getHookPermissions()
-// AFTER_INITIALIZE_FLAG = 0x0400, AFTER_SWAP_FLAG = 0x0080
-const HOOK_FLAGS = BigInt("0x0480");
 
 /**
  * @notice Compute a deterministic hook address with the correct flag bits
@@ -82,6 +80,7 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
   let sellerAddress: string;
   let buyerAddress: string;
   let hookAddress: string;
+  let poolManagerAddress: string;
 
   // ── Contracts ─────────────────────────────────────────────────────────────
   let poolManager: Contract;
@@ -101,7 +100,7 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
   // Using 6-decimal tokens so amounts fit in euint64
   // 1 token = 1_000_000 (1e6)
   const SELLER_DEPOSIT = ethers.parseUnits("1", 6);    // 1 TOKEN0 (e.g. WETH with 6 dec)
-  const BUYER_DEPOSIT  = ethers.parseUnits("2000", 6); // 2000 TOKEN1 (e.g. USDC)
+  const BUYER_DEPOSIT  = ethers.parseUnits("20", 6); // 20 TOKEN1 (e.g. USDC)
   const LIQUIDITY_AMOUNT = ethers.parseUnits("100000", 6);
 
   const ORDER_TICK = 60; // valid for tickSpacing=60
@@ -111,6 +110,14 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
   // ==========================================================================
 
   before(async function () {
+    if (!fhevm.isMock) {
+        throw new Error(`This hardhat test suite can only run in FHEVM mock environment`);
+    } else {
+      console.log("fhevm is running in mock environment");
+    }
+    // Initialize FHEVM
+    await fhevm.initializeCLIApi();
+
     [deployer, seller, buyer] = await ethers.getSigners();
     sellerAddress = await seller.getAddress();
     buyerAddress = await buyer.getAddress();
@@ -135,109 +142,58 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
       POOL_MANAGER_ABI,
       deployer
     );
-    const POOL_MANAGER_ADDRESS = await poolManagerContract.getAddress();
+    poolManagerAddress = await poolManagerContract.getAddress();
 
-    console.log("PoolManager deployed at:", POOL_MANAGER_ADDRESS);
+    console.log("PoolManager deployed at:", poolManagerAddress);
 
+    // const PoolEncryptedTokenFactory = (await ethers.getContractFactory("PoolEncryptedToken")) as PoolEncryptedToken__factory;
+    // const PoolEncryptedTokenContract = await PoolEncryptedTokenFactory.deploy(); 
+    // const CWETHContractAddress = await CWETHContract.getAddress();
+
+    // deploy VeilBookHook
 //.............................................................................................
 
+const hookFactory = await ethers.getContractFactory("VeilBookFactory");
+const hookFactoryContract = await hookFactory.deploy();
+await hookFactoryContract.waitForDeployment();
+const hookFactoryAddress = await hookFactoryContract.getAddress();
+console.log("VeilBookFactory address:", hookFactoryAddress);
 
- // Step 1: Deploy DeterministicDeployFactory
- console.log("\n1. Deploying DeterministicDeployFactory...");
- const DeterministicDeployFactory = await ethers.getContractFactory("DeterministicDeployFactory");
- const factory = await DeterministicDeployFactory.deploy();
- await factory.waitForDeployment();
- const factoryAddress = await factory.getAddress();
- console.log("DeterministicDeployFactory deployed to:", factoryAddress);
+const AFTER_INITIALIZE_FLAG = 1n << 12n;
+const AFTER_SWAP_FLAG       = 1n << 6n;
+const requiredFlags = AFTER_INITIALIZE_FLAG | AFTER_SWAP_FLAG; // 0x1040
 
-
- // Calculate the required hook flags
- console.log("\n3. Calculating required hook flags...");
-const AFTER_INITIALIZE_FLAG = 1n << 4n;
-const AFTER_SWAP_FLAG = 1n << 6n;
+let salt: string = "";
+let finalAddress: string = "";
 
 
-const requiredFlags = AFTER_INITIALIZE_FLAG | AFTER_SWAP_FLAG;
-console.log("Required flags:", requiredFlags.toString(16));
+for (let i = 0; i < 200000; i++) {
+  salt = ethers.zeroPadValue(ethers.toBeHex(i), 32);
+  const expectedAddress = await hookFactoryContract.getPrecomputedHookAddress(
+      poolManagerAddress,
+      salt
+  );
 
-// Get the bytecode for VeilBook Hook
-console.log("\n4. Preparing VeilBook Hook bytecode...");
+  const flags = BigInt(expectedAddress) & 0x3FFFn;
+  if (flags === requiredFlags) {
+      finalAddress = expectedAddress;
+      console.log(`Found valid address at salt=${i}: ${finalAddress}`);
+      console.log(`Flags: 0x${flags.toString(16)}`);
+      break;
+  }
+}
+hookAddress = finalAddress;
+
+
+await hookFactoryContract.deploy(poolManagerAddress, salt);
+console.log("VeilBook Hook deployed at:", hookAddress);
+
+// Attach hook
 const VeilBookHookFactory = await ethers.getContractFactory("VeilBook");
-const deploymentData = VeilBookHookFactory.getDeployTransaction(POOL_MANAGER_ADDRESS);
-const bytecode = (await deploymentData).data as string;
-console.log("Bytecode length:", bytecode.length);
-
-// Step 5: Find a salt that gives us an address with the correct flags
-console.log("\n5. Finding salt for correct address...");
-console.log("This may take a while...");
-
-let salt = 0n;
-// let targetAddress = "";
-let found = false;
-const maxIterations = 100000; // Limit iterations for demo
-
-for (let i = 0; i < maxIterations && !found; i++) {
-  salt = BigInt(i);
-  hookAddress = await factory.computeAddress(bytecode, salt);
-
-  // Extract flags from address (last 2 bytes before the checksum)
-  const addressBigInt = BigInt(hookAddress);
-  const addressFlags = (addressBigInt >> 144n) & 0xFFFFn;
-
-  // Check if the address flags match our required flags
-  // The address must have the required bits set
-  if ((addressFlags & requiredFlags) === requiredFlags) {
-    found = true;
-    console.log("\n✓ Found valid address!");
-    console.log("Salt:", salt.toString());
-    console.log("Address:", hookAddress);
-    console.log("Address flags:", addressFlags.toString(16));
-    break;
-  }
-
-  if (i % 10000 === 0 && i > 0) {
-    console.log(`Tried ${i} salts...`);
-  }
-}
-
-if (!found) {
-  console.log("\n⚠ Could not find valid address in", maxIterations, "iterations");
-  console.log("In production, you would continue searching or use a different namespace");
-  console.log("\nAlternatively, you can:");
-  console.log("1. Use Foundry's vm.etch() to deploy to any address (testing only)");
-  console.log("2. Mine for a salt offchain with more iterations");
-  console.log("3. Use the namespace trick: XOR with a namespace value");
-  return;
-}
+hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
 
 
-  // Deploy the hook using the found salt................
-  console.log("\n6. Deploying VeilBook to computed address...");
-  const deployTx = await factory.deploy(bytecode, salt);
-  await deployTx.wait();
-
-  console.log("\n✓ VeilBook deployed successfully!");
-  console.log("Address:", hookAddress);
-
-  hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
-
-  // Verify the deployment
-  console.log("\n7. Verifying deployment...");
-  const deployedCode = await ethers.provider.getCode(hookAddress);
-  if (deployedCode !== "0x") {
-    console.log("✓ Contract deployed and verified!");
-  } else {
-    console.log("✗ Deployment verification failed");
-  }
-
-  console.log("\n" + "=".repeat(80));
-  console.log("DEPLOYMENT SUMMARY");
-  console.log("=".repeat(80));
-  console.log("DeterministicDeployFactory:", factoryAddress);
-  console.log("PoolManager:", POOL_MANAGER_ADDRESS);
-  console.log("VeilBook Hook:", hookAddress);
-  console.log("Salt used:", salt.toString());
-  console.log("=".repeat(80));
+  
 
 //.............................................................................................
 
@@ -267,7 +223,7 @@ if (!found) {
       "PoolModifyLiquidityTest",
       deployer
     );
-    const modifyRouter = await ModifyLiquidityFactory.deploy(POOL_MANAGER_ADDRESS);
+    const modifyRouter = await ModifyLiquidityFactory.deploy(poolManagerAddress);
     await modifyRouter.waitForDeployment();
     modifyLiquidityRouter = new ethers.Contract(
       await modifyRouter.getAddress(),
@@ -278,7 +234,7 @@ if (!found) {
 
     // ── 4. Deploy PoolSwapTest router ─────────────────────────────────────
     const SwapRouterFactory = await ethers.getContractFactory("PoolSwapTest", deployer);
-    const swapRouterContract = await SwapRouterFactory.deploy(POOL_MANAGER_ADDRESS);
+    const swapRouterContract = await SwapRouterFactory.deploy(poolManagerAddress);
     await swapRouterContract.waitForDeployment();
     swapRouter = new ethers.Contract(
       await swapRouterContract.getAddress(),
@@ -318,14 +274,14 @@ if (!found) {
     // Tight range around current tick
     await modifyLiquidityRouter.modifyLiquidity(
       poolKey,
-      { tickLower: -120, tickUpper: 120, liquidityDelta: ethers.parseEther("100"), salt: ethers.ZeroHash },
+      { tickLower: -120, tickUpper: 120, liquidityDelta: ethers.parseUnits("100", 6), salt: ethers.ZeroHash },
       "0x"
     );
 
     // Wide range for full coverage
     await modifyLiquidityRouter.modifyLiquidity(
       poolKey,
-      { tickLower: -6000, tickUpper: 6000, liquidityDelta: ethers.parseEther("1000"), salt: ethers.ZeroHash },
+      { tickLower: -6000, tickUpper: 6000, liquidityDelta: ethers.parseUnits("100", 6), salt: ethers.ZeroHash },
       "0x"
     );
 
@@ -418,140 +374,154 @@ if (!found) {
   //                        PLACE ORDER TESTS
   // ==========================================================================
 
-  // describe("placeOrder()", function () {
-  //   let sellerOrderId: string;
-  //   let buyerOrderId: string;
+  describe("placeOrder()", function () {
+    let sellerOrderId: string;
+    let buyerOrderId: string;
 
-  //   before(async function () {
-  //     // Ensure both have deposited
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT);
-  //   });
+    before(async function () {
+      // Ensure both have deposited
+      await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
+      await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT);
+    });
 
-  //   it("should place a sell order (zeroForOne=false) for seller", async function () {
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey,
-  //       ORDER_TICK,
-  //       false, // seller: zeroForOne=false
-  //       ethers.ZeroHash, // mock encrypted amount (FHE no-op in hardhat)
-  //       "0x"
-  //     );
-  //     const receipt = await tx.wait();
+    it("should place a sell order (zeroForOne=false) for seller", async function () {
+      // get encrypted token1
 
-  //     // Get orderId from OrderPlaced event
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try {
-  //         const parsed = hook.interface.parseLog(log);
-  //         return parsed?.name === "OrderPlaced";
-  //       } catch { return false; }
-  //     });
-  //     expect(event).to.not.be.undefined;
+      const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token1Address);
 
-  //     const parsed = hook.interface.parseLog(event!);
-  //     sellerOrderId = parsed!.args.orderId;
+      const PoolEncryptedTokenFactory = await ethers.getContractFactory("PoolEncryptedToken");
+      const encryptedTokenContract = PoolEncryptedTokenFactory.attach(encryptedTokenAddress);
 
-  //     console.log("    Seller OrderId:", sellerOrderId);
-  //   });
+      
+      const until = Math.floor(Date.now() / 1000) + 1000;
+      await encryptedTokenContract.connect(seller).setOperator(hookAddress, until)
 
-  //   it("should store seller order with correct public fields", async function () {
-  //     const order = await hook.getOrder(sellerOrderId);
-  //     expect(order.owner).to.equal(sellerAddress);
-  //     expect(order.tick).to.equal(ORDER_TICK);
-  //     expect(order.zeroForOne).to.equal(false);
-  //     expect(order.active).to.equal(true);
-  //   });
+      const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+      .add64(ethers.parseUnits("2", 6))
+      .encrypt()
+      const tx = await hook.connect(seller).placeOrder(
+        poolKey,
+        ORDER_TICK,
+        false, // seller: zeroForOne=false, selling token1
+        encryptedInput.handles[0],
+        encryptedInput.inputProof
+      );
+      const receipt = await tx.wait();
 
-  //   it("should add seller order to order book", async function () {
-  //     const count = await hook.getOrderCount(poolId, ORDER_TICK, false);
-  //     expect(count).to.be.gte(1n);
-  //   });
+      // Get orderId from OrderPlaced event
+      const event = receipt?.logs.find((log: any) => {
+        try {
+          const parsed = hook.interface.parseLog(log);
+          return parsed?.name === "OrderPlaced";
+        } catch { return false; }
+      });
+      expect(event).to.not.be.undefined;
 
-  //   it("should add seller order to user order list", async function () {
-  //     const orders = await hook.getUserOrders(sellerAddress);
-  //     expect(orders).to.include(sellerOrderId);
-  //   });
+      const parsed = hook.interface.parseLog(event!);
+      sellerOrderId = parsed!.args.orderId;
 
-  //   it("should place a buy order (zeroForOne=true) for buyer", async function () {
-  //     const tx = await hook.connect(buyer).placeOrder(
-  //       poolKey,
-  //       ORDER_TICK,
-  //       true, // buyer: zeroForOne=true
-  //       ethers.ZeroHash,
-  //       "0x"
-  //     );
-  //     const receipt = await tx.wait();
+      console.log("    Seller OrderId:", sellerOrderId);
+    });
 
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try {
-  //         const parsed = hook.interface.parseLog(log);
-  //         return parsed?.name === "OrderPlaced";
-  //       } catch { return false; }
-  //     });
+    it("should store seller order with correct public fields", async function () {
+      const order = await hook.getOrder(sellerOrderId);
+      expect(order.owner).to.equal(sellerAddress);
+      expect(order.tick).to.equal(ORDER_TICK);
+      expect(order.zeroForOne).to.equal(false);
+      expect(order.active).to.equal(true);
+    });
 
-  //     const parsed = hook.interface.parseLog(event!);
-  //     buyerOrderId = parsed!.args.orderId;
+    it("should add seller order to order book", async function () {
+      const count = await hook.getOrderCount(poolId, ORDER_TICK, false);
+      expect(count).to.be.gte(1n);
+    });
 
-  //     console.log("    Buyer OrderId:", buyerOrderId);
-  //   });
+    it("should add seller order to user order list", async function () {
+      const orders = await hook.getUserOrders(sellerAddress);
+      expect(orders).to.include(sellerOrderId);
+    });
 
-  //   it("should store buyer order with correct public fields", async function () {
-  //     const order = await hook.getOrder(buyerOrderId);
-  //     expect(order.owner).to.equal(buyerAddress);
-  //     expect(order.tick).to.equal(ORDER_TICK);
-  //     expect(order.zeroForOne).to.equal(true);
-  //     expect(order.active).to.equal(true);
-  //   });
+    it("should place a buy order (zeroForOne=true) for buyer", async function () {
+      const tx = await hook.connect(buyer).placeOrder(
+        poolKey,
+        ORDER_TICK,
+        true, // buyer: zeroForOne=true
+        ethers.ZeroHash,
+        "0x"
+      );
+      const receipt = await tx.wait();
 
-  //   it("should round non-aligned tick down to nearest spacing", async function () {
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
+      const event = receipt?.logs.find((log: any) => {
+        try {
+          const parsed = hook.interface.parseLog(log);
+          return parsed?.name === "OrderPlaced";
+        } catch { return false; }
+      });
 
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey,
-  //       75, // should round to 60
-  //       false,
-  //       ethers.ZeroHash,
-  //       "0x"
-  //     );
-  //     const receipt = await tx.wait();
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     const parsed = hook.interface.parseLog(event!);
-  //     const order = await hook.getOrder(parsed!.args.orderId);
-  //     expect(order.tick).to.equal(60n);
-  //   });
+      const parsed = hook.interface.parseLog(event!);
+      buyerOrderId = parsed!.args.orderId;
 
-  //   it("should round negative tick towards negative infinity", async function () {
-  //     await hook.connect(buyer).deposit(poolKey, token1Address, BUYER_DEPOSIT);
+      console.log("    Buyer OrderId:", buyerOrderId);
+    });
 
-  //     const tx = await hook.connect(buyer).placeOrder(
-  //       poolKey,
-  //       -75, // should round to -120
-  //       true,
-  //       ethers.ZeroHash,
-  //       "0x"
-  //     );
-  //     const receipt = await tx.wait();
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     const parsed = hook.interface.parseLog(event!);
-  //     const order = await hook.getOrder(parsed!.args.orderId);
-  //     expect(order.tick).to.equal(-120n);
-  //   });
+    it("should store buyer order with correct public fields", async function () {
+      const order = await hook.getOrder(buyerOrderId);
+      expect(order.owner).to.equal(buyerAddress);
+      expect(order.tick).to.equal(ORDER_TICK);
+      expect(order.zeroForOne).to.equal(true);
+      expect(order.active).to.equal(true);
+    });
 
-  //   it("should revert if pool not initialized (no encrypted token)", async function () {
-  //     const fakeKey = encodePoolKey(
-  //       token0Address, token1Address, 500, 10,
-  //       await hook.getAddress()
-  //     );
-  //     await expect(
-  //       hook.connect(seller).placeOrder(fakeKey, 60, false, ethers.ZeroHash, "0x")
-  //     ).to.be.revertedWithCustomError(hook, "PoolNotInitialized");
-  //   });
-  // });
+    it("should round non-aligned tick down to nearest spacing", async function () {
+      await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
+
+      const tx = await hook.connect(seller).placeOrder(
+        poolKey,
+        75, // should round to 60
+        false,
+        ethers.ZeroHash,
+        "0x"
+      );
+      const receipt = await tx.wait();
+      const event = receipt?.logs.find((log: any) => {
+        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+        catch { return false; }
+      });
+      const parsed = hook.interface.parseLog(event!);
+      const order = await hook.getOrder(parsed!.args.orderId);
+      expect(order.tick).to.equal(60n);
+    });
+
+    it("should round negative tick towards negative infinity", async function () {
+      await hook.connect(buyer).deposit(poolKey, token1Address, BUYER_DEPOSIT);
+
+      const tx = await hook.connect(buyer).placeOrder(
+        poolKey,
+        -75, // should round to -120
+        true,
+        ethers.ZeroHash,
+        "0x"
+      );
+      const receipt = await tx.wait();
+      const event = receipt?.logs.find((log: any) => {
+        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+        catch { return false; }
+      });
+      const parsed = hook.interface.parseLog(event!);
+      const order = await hook.getOrder(parsed!.args.orderId);
+      expect(order.tick).to.equal(-120n);
+    });
+
+    it("should revert if pool not initialized (no encrypted token)", async function () {
+      const fakeKey = encodePoolKey(
+        token0Address, token1Address, 500, 10,
+        await hook.getAddress()
+      );
+      await expect(
+        hook.connect(seller).placeOrder(fakeKey, 60, false, ethers.ZeroHash, "0x")
+      ).to.be.revertedWithCustomError(hook, "PoolNotInitialized");
+    });
+  });
 
   // ==========================================================================
   //                        CANCEL ORDER TESTS

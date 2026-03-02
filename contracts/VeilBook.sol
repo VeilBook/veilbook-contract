@@ -44,7 +44,7 @@ import {FHEPermissions} from "./libraries/FHEPermissions.sol";
  *       price UP   → settle zeroForOne=true  orders (buyers)
  *       price DOWN → settle zeroForOne=false orders (sellers)
  *   - Peer-to-peer settlement — no AMM touched during matching
- *   - Partial fills via FHE.min() on remaining amounts
+ *   - Partial fills via FHE.min() on remaining amounts,
  */
 contract VeilBook is
     BaseHook,
@@ -561,6 +561,10 @@ contract VeilBook is
 
     function getEncryptedToken(PoolId poolId, Currency currency) external view returns (address) {
         return address(poolEncryptedTokens[poolId][currency]);
+    }
+
+    function getEncryptedTokenContract(PoolId poolId, Currency currency) external view returns (PoolEncryptedToken) {
+        return poolEncryptedTokens[poolId][currency];
     }
 
     // =============================================================
