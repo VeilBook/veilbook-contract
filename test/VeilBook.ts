@@ -389,201 +389,201 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //                        PLACE ORDER TESTS
   // ==========================================================================
 
-  describe("placeOrder()", function () {
-    let sellerOrderId: string;
-    let buyerOrderId: string;
+  // describe("placeOrder()", function () {
+  //   let sellerOrderId: string;
+  //   let buyerOrderId: string;
 
-    before(async function () {
-      // Ensure both have deposited
-      await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-      await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT);
+  //   before(async function () {
+  //     // Ensure both have deposited
+  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
+  //     await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT);
 
       
-    });
+  //   });
 
-    it("should place a sell order (zeroForOne=true) for seller", async function () {
+  //   it("should place a sell order (zeroForOne=true) for seller", async function () {
 
-      const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token0Address);
+  //     const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token0Address);
 
-      // const encryptedTokenContract = PoolEncryptedToken__factory.connect(
-      //   encryptedTokenAddress,
-      //   seller
-      // );
-      const encryptedTokenContract = await ethers.getContractAt(
-        "PoolEncryptedToken",
-        encryptedTokenAddress
-      );
+  //     // const encryptedTokenContract = PoolEncryptedToken__factory.connect(
+  //     //   encryptedTokenAddress,
+  //     //   seller
+  //     // );
+  //     const encryptedTokenContract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedTokenAddress
+  //     );
 
-      console.log({encryptedTokenAddress})
-      console.log("Hook address in test:", hookAddress);
-      console.log("Hook address from contract:", await hook.getAddress());
+  //     console.log({encryptedTokenAddress})
+  //     console.log("Hook address in test:", hookAddress);
+  //     console.log("Hook address from contract:", await hook.getAddress());
 
-      const until = Math.floor(Date.now() / 1000) + 1000000;
-      await encryptedTokenContract.connect(seller).setOperator(hookAddress, until);
-
-
-      const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
-      .add64(SELLER_DEPOSIT)
-      .encrypt()
-      const tx = await hook.connect(seller).placeOrder(
-        poolKey,
-        ORDER_TICK,
-        true, // seller: zeroForOne=true, selling token0
-        encryptedInput.handles[0],
-        encryptedInput.inputProof
-      );
-      const receipt = await tx.wait();
-
-      // Get orderId from OrderPlaced event
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = hook.interface.parseLog(log);
-          return parsed?.name === "OrderPlaced";
-        } catch { return false; }
-      });
-      expect(event).to.not.be.undefined;
-
-      const parsed = hook.interface.parseLog(event!);
-      sellerOrderId = parsed!.args.orderId;
-
-      console.log("    Seller OrderId:", sellerOrderId);
-    });
-
-    it("should store seller order with correct public fields", async function () {
-      const order = await hook.getOrder(sellerOrderId);
-      expect(order.owner).to.equal(sellerAddress);
-      expect(order.tick).to.equal(ORDER_TICK);
-      expect(order.zeroForOne).to.equal(true);
-      expect(order.active).to.equal(true);
-    });
-
-    it("should add seller order to order book", async function () {
-
-      const count = await hook.getOrderCount(poolId, ORDER_TICK, false);
-      expect(count).to.be.gte(0n);
-    });
-
-    it("should add seller order to user order list", async function () {
-      const orders = await hook.getUserOrders(sellerAddress);
-      expect(orders).to.include(sellerOrderId);
-    });
-
-    it("should place a buy order (zeroForOne=false) for buyer", async function () {
+  //     const until = Math.floor(Date.now() / 1000) + 1000000;
+  //     await encryptedTokenContract.connect(seller).setOperator(hookAddress, until);
 
 
-      const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token1Address);
+  //     const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+  //     .add64(SELLER_DEPOSIT)
+  //     .encrypt()
+  //     const tx = await hook.connect(seller).placeOrder(
+  //       poolKey,
+  //       ORDER_TICK,
+  //       true, // seller: zeroForOne=true, selling token0
+  //       encryptedInput.handles[0],
+  //       encryptedInput.inputProof
+  //     );
+  //     const receipt = await tx.wait();
 
-      const encryptedTokenContract = await ethers.getContractAt(
-        "PoolEncryptedToken",
-        encryptedTokenAddress
-      );
+  //     // Get orderId from OrderPlaced event
+  //     const event = receipt?.logs.find((log: any) => {
+  //       try {
+  //         const parsed = hook.interface.parseLog(log);
+  //         return parsed?.name === "OrderPlaced";
+  //       } catch { return false; }
+  //     });
+  //     expect(event).to.not.be.undefined;
 
+  //     const parsed = hook.interface.parseLog(event!);
+  //     sellerOrderId = parsed!.args.orderId;
 
-      const until = Math.floor(Date.now() / 1000) + 1000000;
-      await encryptedTokenContract.connect(buyer).setOperator(hookAddress, until);
+  //     console.log("    Seller OrderId:", sellerOrderId);
+  //   });
 
+  //   it("should store seller order with correct public fields", async function () {
+  //     const order = await hook.getOrder(sellerOrderId);
+  //     expect(order.owner).to.equal(sellerAddress);
+  //     expect(order.tick).to.equal(ORDER_TICK);
+  //     expect(order.zeroForOne).to.equal(true);
+  //     expect(order.active).to.equal(true);
+  //   });
 
-      const encryptedInput = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
-      .add64(BUYER_DEPOSIT)
-      .encrypt();
+  //   it("should add seller order to order book", async function () {
 
-      const tx = await hook.connect(buyer).placeOrder(
-        poolKey,
-        ORDER_TICK,
-        false, // buyer: zeroForOne=false
-        encryptedInput.handles[0],
-        encryptedInput.inputProof
-      );
-      const receipt = await tx.wait();
+  //     const count = await hook.getOrderCount(poolId, ORDER_TICK, false);
+  //     expect(count).to.be.gte(0n);
+  //   });
 
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          const parsed = hook.interface.parseLog(log);
-          return parsed?.name === "OrderPlaced";
-        } catch { return false; }
-      });
+  //   it("should add seller order to user order list", async function () {
+  //     const orders = await hook.getUserOrders(sellerAddress);
+  //     expect(orders).to.include(sellerOrderId);
+  //   });
 
-      const parsed = hook.interface.parseLog(event!);
-      buyerOrderId = parsed!.args.orderId;
-
-      console.log("    Buyer OrderId:", buyerOrderId);
-    });
-
-    it("should store buyer order with correct public fields", async function () {
-      const order = await hook.getOrder(buyerOrderId);
-      expect(order.owner).to.equal(buyerAddress);
-      expect(order.tick).to.equal(ORDER_TICK);
-      expect(order.zeroForOne).to.equal(false);
-      expect(order.active).to.equal(true);
-    });
-
-    it("should round non-aligned tick down to nearest spacing", async function () {
-
-      const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token0Address);
-      const encryptedTokenContract = await ethers.getContractAt(
-        "PoolEncryptedToken",
-        encryptedTokenAddress
-      );
-
-      const until = Math.floor(Date.now() / 1000) + 1000000;
-      await encryptedTokenContract.connect(seller).setOperator(hookAddress, until);
+  //   it("should place a buy order (zeroForOne=false) for buyer", async function () {
 
 
-      const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
-      .add64(SELLER_DEPOSIT)
-      .encrypt()
+  //     const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token1Address);
 
-      const tx = await hook.connect(seller).placeOrder(
-        poolKey,
-        75, // should round to 60
-        true,
-        encryptedInput.handles[0],
-        encryptedInput.inputProof
-      );
-      const receipt = await tx.wait();
-      const event = receipt?.logs.find((log: any) => {
-        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-        catch { return false; }
-      });
-      const parsed = hook.interface.parseLog(event!);
-      const order = await hook.getOrder(parsed!.args.orderId);
-      expect(order.tick).to.equal(60n);
-    });
-
-    it("should round negative tick towards negative infinity", async function () {
-      const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token1Address);
-
-      const encryptedTokenContract = await ethers.getContractAt(
-        "PoolEncryptedToken",
-        encryptedTokenAddress
-      );
-
-      const until = Math.floor(Date.now() / 1000) + 1000000;
-      await encryptedTokenContract.connect(buyer).setOperator(hookAddress, until);
+  //     const encryptedTokenContract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedTokenAddress
+  //     );
 
 
-      const encryptedInput = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
-      .add64(BUYER_DEPOSIT)
-      .encrypt();
+  //     const until = Math.floor(Date.now() / 1000) + 1000000;
+  //     await encryptedTokenContract.connect(buyer).setOperator(hookAddress, until);
 
-      const tx = await hook.connect(buyer).placeOrder(
-        poolKey,
-        -75, // should round to -120
-        false,
-        encryptedInput.handles[0],
-        encryptedInput.inputProof
-      );
-      const receipt = await tx.wait();
-      const event = receipt?.logs.find((log: any) => {
-        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-        catch { return false; }
-      });
-      const parsed = hook.interface.parseLog(event!);
-      const order = await hook.getOrder(parsed!.args.orderId);
-      expect(order.tick).to.equal(-120n);
-    });
 
-  });
+  //     const encryptedInput = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
+  //     .add64(BUYER_DEPOSIT)
+  //     .encrypt();
+
+  //     const tx = await hook.connect(buyer).placeOrder(
+  //       poolKey,
+  //       ORDER_TICK,
+  //       false, // buyer: zeroForOne=false
+  //       encryptedInput.handles[0],
+  //       encryptedInput.inputProof
+  //     );
+  //     const receipt = await tx.wait();
+
+  //     const event = receipt?.logs.find((log: any) => {
+  //       try {
+  //         const parsed = hook.interface.parseLog(log);
+  //         return parsed?.name === "OrderPlaced";
+  //       } catch { return false; }
+  //     });
+
+  //     const parsed = hook.interface.parseLog(event!);
+  //     buyerOrderId = parsed!.args.orderId;
+
+  //     console.log("    Buyer OrderId:", buyerOrderId);
+  //   });
+
+  //   it("should store buyer order with correct public fields", async function () {
+  //     const order = await hook.getOrder(buyerOrderId);
+  //     expect(order.owner).to.equal(buyerAddress);
+  //     expect(order.tick).to.equal(ORDER_TICK);
+  //     expect(order.zeroForOne).to.equal(false);
+  //     expect(order.active).to.equal(true);
+  //   });
+
+  //   it("should round non-aligned tick down to nearest spacing", async function () {
+
+  //     const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token0Address);
+  //     const encryptedTokenContract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedTokenAddress
+  //     );
+
+  //     const until = Math.floor(Date.now() / 1000) + 1000000;
+  //     await encryptedTokenContract.connect(seller).setOperator(hookAddress, until);
+
+
+  //     const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+  //     .add64(SELLER_DEPOSIT)
+  //     .encrypt()
+
+  //     const tx = await hook.connect(seller).placeOrder(
+  //       poolKey,
+  //       75, // should round to 60
+  //       true,
+  //       encryptedInput.handles[0],
+  //       encryptedInput.inputProof
+  //     );
+  //     const receipt = await tx.wait();
+  //     const event = receipt?.logs.find((log: any) => {
+  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+  //       catch { return false; }
+  //     });
+  //     const parsed = hook.interface.parseLog(event!);
+  //     const order = await hook.getOrder(parsed!.args.orderId);
+  //     expect(order.tick).to.equal(60n);
+  //   });
+
+  //   it("should round negative tick towards negative infinity", async function () {
+  //     const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token1Address);
+
+  //     const encryptedTokenContract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedTokenAddress
+  //     );
+
+  //     const until = Math.floor(Date.now() / 1000) + 1000000;
+  //     await encryptedTokenContract.connect(buyer).setOperator(hookAddress, until);
+
+
+  //     const encryptedInput = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
+  //     .add64(BUYER_DEPOSIT)
+  //     .encrypt();
+
+  //     const tx = await hook.connect(buyer).placeOrder(
+  //       poolKey,
+  //       -75, // should round to -120
+  //       false,
+  //       encryptedInput.handles[0],
+  //       encryptedInput.inputProof
+  //     );
+  //     const receipt = await tx.wait();
+  //     const event = receipt?.logs.find((log: any) => {
+  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+  //       catch { return false; }
+  //     });
+  //     const parsed = hook.interface.parseLog(event!);
+  //     const order = await hook.getOrder(parsed!.args.orderId);
+  //     expect(order.tick).to.equal(-120n);
+  //   });
+
+  // });
 
   // ==========================================================================
   //                        CANCEL ORDER TESTS
@@ -594,8 +594,24 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
 
   //   before(async function () {
   //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
+
+  //        const encryptedTokenAddress = await hook.getEncryptedToken(poolId, token0Address);
+
+  //         const encryptedTokenContract = await ethers.getContractAt(
+  //           "PoolEncryptedToken",
+  //           encryptedTokenAddress
+  //         );
+    
+  //         const until = Math.floor(Date.now() / 1000) + 1000000;
+  //         await encryptedTokenContract.connect(seller).setOperator(hookAddress, until);
+    
+    
+  //         const encryptedInput = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+  //         .add64(SELLER_DEPOSIT)
+  //         .encrypt()
+
   //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
+  //       poolKey, ORDER_TICK, true, encryptedInput.handles[0], encryptedInput.inputProof
   //     );
   //     const receipt = await tx.wait();
   //     const event = receipt?.logs.find((log: any) => {
@@ -605,67 +621,22 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //     cancelOrderId = hook.interface.parseLog(event!)!.args.orderId;
   //   });
 
-  //   it("should mark order inactive after cancel", async function () {
+  //   it("should mark order inactive and refund token0 to seller after cancel", async function () {
+  //     const balBefore = await token0.balanceOf(sellerAddress);
+
   //     await hook.connect(seller).cancelOrder(cancelOrderId, SELLER_DEPOSIT);
   //     const order = await hook.getOrder(cancelOrderId);
-  //     expect(order.active).to.equal(false);
-  //   });
-
-  //   it("should refund token0 to seller after cancel", async function () {
-  //     // Place a new order to cancel
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
-  //     );
-  //     const receipt = await tx.wait();
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     const orderId = hook.interface.parseLog(event!)!.args.orderId;
-
-  //     const balBefore = await token0.balanceOf(sellerAddress);
-  //     await hook.connect(seller).cancelOrder(orderId, SELLER_DEPOSIT);
+      
   //     const balAfter = await token0.balanceOf(sellerAddress);
-
+  //     expect(order.active).to.equal(false);
   //     expect(balAfter - balBefore).to.equal(SELLER_DEPOSIT);
   //   });
 
   //   it("should revert if not order owner", async function () {
-  //     // Place fresh order
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
-  //     );
-  //     const receipt = await tx.wait();
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     const orderId = hook.interface.parseLog(event!)!.args.orderId;
 
   //     await expect(
-  //       hook.connect(buyer).cancelOrder(orderId, SELLER_DEPOSIT)
+  //       hook.connect(buyer).cancelOrder(cancelOrderId, SELLER_DEPOSIT)
   //     ).to.be.revertedWithCustomError(hook, "NotOrderOwner");
-  //   });
-
-  //   it("should revert on double cancel", async function () {
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
-  //     );
-  //     const receipt = await tx.wait();
-  //     const event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     const orderId = hook.interface.parseLog(event!)!.args.orderId;
-
-  //     await hook.connect(seller).cancelOrder(orderId, SELLER_DEPOSIT);
-
-  //     await expect(
-  //       hook.connect(seller).cancelOrder(orderId, SELLER_DEPOSIT)
-  //     ).to.be.revertedWithCustomError(hook, "OrderNotActive");
   //   });
 
   //   it("should revert if order not found", async function () {

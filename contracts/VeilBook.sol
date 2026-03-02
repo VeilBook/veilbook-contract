@@ -365,7 +365,7 @@ contract VeilBook is
         OrderTypes.LimitOrder storage order = orders[orderId];
         if (order.owner == address(0)) revert OrderNotFound();
         if (order.owner != msg.sender) revert NotOrderOwner();
-        if (!order.active)             revert OrderNotActive();
+        if (!order.active) revert OrderNotActive();
 
         // Effects before interactions
         order.active = false;
