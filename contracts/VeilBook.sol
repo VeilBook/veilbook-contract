@@ -150,27 +150,7 @@ contract VeilBook is
         return BaseHook.afterInitialize.selector;
     }
 
-    /**
-     * @notice After every swap, detect tick direction and settle orders
-     *
-     * @dev Tick loop logic (adapted from TakeProfitsHook):
-     *
-     *   Price went UP (currentTick > prevTick):
-     *     → People bought currency0 (e.g. ETH) by selling currency1 (e.g. USDC)
-     *     → ETH price increased
-     *     → Settle zeroForOne=true orders (buyers who wanted ETH at this price)
-     *     → Loop: prevTick → currentTick (ascending)
-     *
-     *   Price went DOWN (currentTick < prevTick):
-     *     → People sold currency0 (e.g. ETH) for currency1 (e.g. USDC)
-     *     → ETH price decreased
-     *     → Settle zeroForOne=false orders (sellers who wanted to sell ETH at this price)
-     *     → Loop: prevTick → currentTick (descending)
-     *
-     * Unlike TakeProfitsHook we do NOT need the tryMore while loop because
-     * our settlement is peer-to-peer and does NOT execute via AMM —
-     * so it cannot shift the tick and cause a cascade.
-     */
+   
     function _afterSwap(
         address sender,
         PoolKey calldata key,
@@ -217,8 +197,8 @@ contract VeilBook is
     /**
      * @notice Deposit ERC20 or ETH and receive encrypted pool tokens
      *
-     * @dev Buyer  (zeroForOne=true)  deposits currency1 (e.g. USDC)
-     *      Seller (zeroForOne=false) deposits currency0 (e.g. ETH)
+     * @dev  Seller  (zeroForOne=true)  deposits currency0 (e.g. ETH)
+     *       Buyer (zeroForOne=false) deposits currency1 (e.g. USDC)
      *
      * @param key      Pool key
      * @param currency Which currency to deposit (must be currency0 or currency1)
@@ -252,28 +232,11 @@ contract VeilBook is
     }
 
     /**
-     * @notice Place a confidential limit order
-     *
-     * @dev User provides only encAmountIn (encrypted).
-     *      amountOut is computed deterministically on-chain:
-     *
-     *        sqrtPriceX96 = TickMath.getSqrtPriceAtTick(tick)
-     *        price        = sqrtPriceX96^2 / 2^192  (scaled by PRICE_SCALE)
-     *
-     *        zeroForOne=false (seller, currency0 → currency1):
-     *          amountOut = amountIn * price / PRICE_SCALE
-     *
-     *        zeroForOne=true (buyer, currency1 → currency0):
-     *          amountOut = amountIn * PRICE_SCALE / price  (inverted price)
-     *
-     *      This means the user never needs to specify amountOut — the tick fully
-     *      determines the expected output. Novel: no other FHE limit order hook
-     *      computes encrypted output amounts on-chain from tick price.
      *
      * @param key            Pool key
      * @param tick           Target tick — rounded down to tickSpacing boundary
-     * @param zeroForOne     true = buyer (locked currency1, wants currency0)
-     *                       false = seller (locked currency0, wants currency1)
+     * @param zeroForOne     true = seller (locked currency0, wants currency1)
+     *                       false = buyer (locked currency1, wants currency0)
      * @param encAmountIn    Encrypted deposit amount (euint64)
      * @param amountInProof  ZKP proof for encAmountIn
      * @return orderId       Unique identifier for this order
@@ -349,10 +312,6 @@ contract VeilBook is
     /**
      * @notice Cancel an active order and reclaim unfilled collateral
      *
-     * @dev User decrypts filledIn client-side via Zama Relayer + KMS:
-     *        plaintextUnfilled = decrypt(amountIn) - decrypt(filledIn)
-     *      PoolEncryptedToken.burn() enforces the balance on-chain.
-     *
      * @param orderId           Order to cancel
      * @param plaintextUnfilled Unfilled deposit amount (decrypted client-side)
      */
@@ -390,12 +349,12 @@ contract VeilBook is
      *
      * @dev Flow:
      *   1. Call getOrder(orderId) to get the filledOut euint64 handle
-     *   2. Decrypt filledOut client-side via Zama Relayer + KMS
+     *   2. Decrypt filledOut client-side via Zama Relayer
      *   3. Call claimFill(orderId, decryptedFilledOut)
      *
      *   Outgoing currency = what counterparty deposited:
-     *     Buyer  (zeroForOne=true)  receives currency0 (what seller locked)
-     *     Seller (zeroForOne=false) receives currency1 (what buyer locked)
+     *     Seller  (zeroForOne=true)  receives currency1 (what buyer locked)
+     *     Buyer (zeroForOne=false) receives currency0 (what seller locked)
      *
      * @param orderId          Order to claim from
      * @param plaintextFilled  filledOut amount (decrypted client-side)
@@ -407,7 +366,7 @@ contract VeilBook is
         OrderTypes.LimitOrder storage order = orders[orderId];
         if (order.owner == address(0)) revert OrderNotFound();
         if (order.owner != msg.sender) revert NotOrderOwner();
-        if (plaintextFilled == 0)      revert InvalidAmount();
+        if (plaintextFilled == 0) revert InvalidAmount();
 
         PoolKey memory key = order.poolKey;
         PoolId poolId = key.toId();
@@ -436,22 +395,6 @@ contract VeilBook is
     /**
      * @notice Match buy and sell orders at a specific tick
      *
-     * @dev Both sides' amountOut was computed from the same tick price at placement.
-     *      This guarantees the ratio is consistent — no on-chain price verification needed.
-     *
-     *      Matching (same-unit comparisons):
-     *        sellRemainingIn  = sell.amountIn  - sell.filledIn   (currency0 terms)
-     *        buyRemainingOut  = buy.amountOut  - buy.filledOut   (currency0 terms)
-     *        fillIn = FHE.min(sellRemainingIn, buyRemainingOut)  ← currency0 ✅
-     *
-     *        buyRemainingIn   = buy.amountIn   - buy.filledIn    (currency1 terms)
-     *        sellRemainingOut = sell.amountOut - sell.filledOut  (currency1 terms)
-     *        fillOut = FHE.min(buyRemainingIn, sellRemainingOut) ← currency1 ✅
-     *
-     *      Transfers:
-     *        encToken0: hook → buy.owner   (fillIn  of currency0)
-     *        encToken1: hook → sell.owner  (fillOut of currency1)
-     *
      * @param poolId  Pool being settled
      * @param key     Pool key
      * @param tick    Tick to settle
@@ -469,10 +412,6 @@ contract VeilBook is
         bytes32[] storage buyOrders  = orderBook[poolId][tick][false];  // selling token1
 
         if (buyOrders.length == 0 || sellOrders.length == 0) return;
-        // emit Debug("_settleAtTick called"); 
-
-        // this wasnt emitted meaning the above if statement  returned;
-        // I just read orderCount and the length is 1, so why is the if block returned early
 
         PoolEncryptedToken encToken0 = poolEncryptedTokens[poolId][key.currency0];
         PoolEncryptedToken encToken1 = poolEncryptedTokens[poolId][key.currency1];
@@ -486,7 +425,7 @@ contract VeilBook is
             si < sellOrders.length &&
             iterations < MAX_ORDERS_PER_SETTLE
         ) {
-            OrderTypes.LimitOrder storage buy  = orders[buyOrders[bi]];
+            OrderTypes.LimitOrder storage buy = orders[buyOrders[bi]];
             OrderTypes.LimitOrder storage sell = orders[sellOrders[si]];
             emit Debug("matching pair");
 
@@ -494,20 +433,20 @@ contract VeilBook is
             if (!sell.active) { si++; continue; }
 
             // ── Remaining amounts ─────────────────────────────────────────
-            euint64 sellRemainingIn  = FHE.sub(sell.amountIn,  sell.filledIn);
-            euint64 buyRemainingOut  = FHE.sub(buy.amountOut,  buy.filledOut);
-            euint64 buyRemainingIn   = FHE.sub(buy.amountIn,   buy.filledIn);
+            euint64 sellRemainingIn = FHE.sub(sell.amountIn, sell.filledIn);
+            euint64 buyRemainingOut = FHE.sub(buy.amountOut, buy.filledOut);
+            euint64 buyRemainingIn = FHE.sub(buy.amountIn, buy.filledIn);
             euint64 sellRemainingOut = FHE.sub(sell.amountOut, sell.filledOut);
 
             // ── Fill amounts (same-unit) ──────────────────────────────────
-            euint64 fillIn  = FHE.min(sellRemainingIn,  buyRemainingOut);  // currency0
-            euint64 fillOut = FHE.min(buyRemainingIn,   sellRemainingOut); // currency1
+            euint64 fillIn = FHE.min(sellRemainingIn, buyRemainingOut);  // currency0
+            euint64 fillOut = FHE.min(buyRemainingIn, sellRemainingOut); // currency1
 
             // ── Update fill counters ──────────────────────────────────────
-            euint64 newSellFilledIn  = FHE.add(sell.filledIn,  fillIn);
+            euint64 newSellFilledIn = FHE.add(sell.filledIn, fillIn);
             euint64 newSellFilledOut = FHE.add(sell.filledOut, fillOut);
-            euint64 newBuyFilledIn   = FHE.add(buy.filledIn,   fillOut);
-            euint64 newBuyFilledOut  = FHE.add(buy.filledOut,  fillIn);
+            euint64 newBuyFilledIn = FHE.add(buy.filledIn, fillOut);
+            euint64 newBuyFilledOut = FHE.add(buy.filledOut, fillIn);
 
             // ── Grant ACL for all new handles ─────────────────────────────
             FHEPermissions.grantSettlementPermissions(
@@ -524,10 +463,10 @@ contract VeilBook is
             );
 
             // ── Persist ───────────────────────────────────────────────────
-            sell.filledIn  = newSellFilledIn;
+            sell.filledIn = newSellFilledIn;
             sell.filledOut = newSellFilledOut;
-            buy.filledIn   = newBuyFilledIn;
-            buy.filledOut  = newBuyFilledOut;
+            buy.filledIn = newBuyFilledIn;
+            buy.filledOut = newBuyFilledOut;
 
             // ── Token transfers ───────────────────────────────────────────
 
@@ -586,18 +525,6 @@ contract VeilBook is
 
     /**
      * @notice Compute scaled price at a tick for amountOut calculation
-     *
-     * @dev price = (sqrtPriceX96 / 2^96)^2 = sqrtPriceX96^2 / 2^192
-     *      Scaled by PRICE_SCALE (1e18) to preserve precision in integer math.
-     *      Uses FullMath.mulDiv to avoid overflow on uint256 intermediate values.
-     *
-     *      zeroForOne=false (seller: currency0 → currency1):
-     *        amountOut = amountIn * price  (multiply by price)
-     *        returns price * PRICE_SCALE
-     *
-     *      zeroForOne=true (buyer: currency1 → currency0):
-     *        amountOut = amountIn / price  (divide — invert the price)
-     *        returns PRICE_SCALE^2 / price  (so that mul/div gives correct result)
      *
      * @param tick        The order tick
      * @param zeroForOne  Order direction

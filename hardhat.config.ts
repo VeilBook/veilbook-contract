@@ -12,7 +12,7 @@ import "solidity-coverage";
 
 import "./tasks/accounts";
 import "./tasks/pool";
-import "./tasks/test";
+import "./tasks/pool";
 
 
 configDotenv();

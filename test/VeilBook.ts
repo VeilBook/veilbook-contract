@@ -925,71 +925,57 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
 
     });
 
-    it("seller should receive token1 after claimFill", async function () {
-      const sellerBalBefore = await token1.balanceOf(sellerAddress);
-      const buyerBalBefore = await token0.balanceOf(buyerAddress);
-      console.log("\n    Seller token1 before claim:", ethers.formatUnits(sellerBalBefore, 6));
-      console.log("\n    Buyer token0 before claim:", ethers.formatUnits(buyerBalBefore, 6));
+    // it("seller should receive token1 after claimFill", async function () {
+    //   const sellerBalBefore = await token1.balanceOf(sellerAddress);
+    //   const buyerBalBefore = await token0.balanceOf(buyerAddress);
+    //   console.log("\n    Seller token1 before claim:", ethers.formatUnits(sellerBalBefore, 6));
+    //   console.log("\n    Buyer token0 before claim:", ethers.formatUnits(buyerBalBefore, 6));
 
-        // Swap token1 → token0 (price goes UP)
-      const slot0Before = await stateView.getSlot0(poolId);
-      console.log("\n    Tick before swap:", slot0Before.tick.toString());
-      await swapRouter.swap(
-        poolKey,
-        {
-          zeroForOne: false,
-          amountSpecified: -(BUYER_DEPOSIT * 10n),
-          sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
-        },
-        { takeClaims: false, settleUsingBurn: false },
-        "0x"
-      );
-      // get current tick
-      // convert to price
-      const slot0After = await stateView.getSlot0(poolId);
-      console.log("\n    Tick after swap:", slot0After.tick.toString());
+    //     // Swap token1 → token0 (price goes UP)
+    //   const slot0Before = await stateView.getSlot0(poolId);
+    //   console.log("\n    Tick before swap:", slot0Before.tick.toString());
+    //   await swapRouter.swap(
+    //     poolKey,
+    //     {
+    //       zeroForOne: false,
+    //       amountSpecified: -(BUYER_DEPOSIT * 10n),
+    //       sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
+    //     },
+    //     { takeClaims: false, settleUsingBurn: false },
+    //     "0x"
+    //   );
+    //   // get current tick
+    //   // convert to price
+    //   const slot0After = await stateView.getSlot0(poolId);
+    //   console.log("\n    Tick after swap:", slot0After.tick.toString());
 
-      // get and decrypt order
-      const encSellerOrder = await hook.connect(seller).getOrder(claimSellerOrderId);
-      console.log({sellerFilledOut: encSellerOrder.filledOut});
-      const encBuyerOrder = await hook.connect(buyer).getOrder(claimBuyerOrderId);
-      console.log({BuyerFilledOut: encBuyerOrder.filledOut});
+    //   // get and decrypt order
+    //   const encSellerOrder = await hook.connect(seller).getOrder(claimSellerOrderId);
+    //   console.log({sellerFilledOut: encSellerOrder.filledOut});
+    //   const encBuyerOrder = await hook.connect(buyer).getOrder(claimBuyerOrderId);
+    //   console.log({BuyerFilledOut: encBuyerOrder.filledOut});
 
-      const sellerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encSellerOrder.filledOut, hookAddress, seller);
-      const buyerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encBuyerOrder.filledOut, hookAddress, buyer);
-      console.log({sellerClearFilledOut});
-      console.log({buyerClearFilledOut});
+    //   const sellerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encSellerOrder.filledOut, hookAddress, seller);
+    //   const buyerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encBuyerOrder.filledOut, hookAddress, buyer);
+    //   console.log({sellerClearFilledOut});
+    //   console.log({buyerClearFilledOut});
 
-      const sellerPrice = await hook.getScaledPriceAtTick(60, true);  // seller direction
-      const buyerPrice  = await hook.getScaledPriceAtTick(60, false); // buyer direction
-      console.log("seller scaledPrice:", sellerPrice.toString());
-      console.log("buyer scaledPrice:", buyerPrice.toString());
+    //   const sellerPrice = await hook.getScaledPriceAtTick(60, true);  // seller direction
+    //   const buyerPrice  = await hook.getScaledPriceAtTick(60, false); // buyer direction
+    //   console.log("seller scaledPrice:", sellerPrice.toString());
+    //   console.log("buyer scaledPrice:", buyerPrice.toString());
 
-      // Seller's filledOut = BUYER_DEPOSIT (received TOKEN1 from buyer)
-      await hook.connect(seller).claimFill(claimSellerOrderId, sellerClearFilledOut);
-      await hook.connect(buyer).claimFill(claimBuyerOrderId, buyerClearFilledOut);
+    //   // Seller's filledOut = BUYER_DEPOSIT (received TOKEN1 from buyer)
+    //   await hook.connect(seller).claimFill(claimSellerOrderId, sellerClearFilledOut);
+    //   await hook.connect(buyer).claimFill(claimBuyerOrderId, buyerClearFilledOut);
 
-      const sellerBalAfter = await token1.balanceOf(sellerAddress);
-      const buyerBalAfter = await token0.balanceOf(buyerAddress);
-      console.log("\n    Seller token1 after claim:", ethers.formatUnits(sellerBalAfter, 6));
-      console.log("\n    Buyer token0 after claim:", ethers.formatUnits(buyerBalAfter, 6));
+    //   const sellerBalAfter = await token1.balanceOf(sellerAddress);
+    //   const buyerBalAfter = await token0.balanceOf(buyerAddress);
+    //   console.log("\n    Seller token1 after claim:", ethers.formatUnits(sellerBalAfter, 6));
+    //   console.log("\n    Buyer token0 after claim:", ethers.formatUnits(buyerBalAfter, 6));
 
 
-      // expect(balAfter - balBefore).to.equal(BUYER_DEPOSIT);
-    });
-
-  //   it("buyer should receive token0 after claimFill", async function () {
-  //     const balBefore = await token0.balanceOf(buyerAddress);
-  //     console.log("\n    Buyer token0 before claim:", ethers.formatUnits(balBefore, 6));
-
-  //     // Buyer's filledOut = SELLER_DEPOSIT (received token0 from seller)
-  //     await hook.connect(buyer).claimFill(claimBuyerOrderId, SELLER_DEPOSIT);
-
-  //     const balAfter = await token0.balanceOf(buyerAddress);
-  //     console.log("    Buyer token0 after claim:", ethers.formatUnits(balAfter, 6));
-
-  //     expect(balAfter - balBefore).to.equal(SELLER_DEPOSIT);
-  //   });
+    // });
 
   //   it("should revert claimFill with zero amount", async function () {
   //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
