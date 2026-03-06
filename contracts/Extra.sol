@@ -27,6 +27,7 @@
 // import {OrderTypes} from "./libraries/OrderTypes.sol";
 // import {FHEPermissions} from "./libraries/FHEPermissions.sol";
 
+
 // /**
 //  * @title VeilBook
 //  * @notice The order book that only you can read.
@@ -67,6 +68,10 @@
 //     error InvalidAmount();
 //     error InvalidCurrency();
 //     error PoolNotInitialized();
+
+//     // Add these temporary debug events at the top of your contract
+//     event Debug(string message);
+
 
 //     // =============================================================
 //     //                        STATE VARIABLES
@@ -178,6 +183,8 @@
 //     ) internal override returns (bytes4, int128) {
 //         // Avoid re-entrancy from hook-initiated swaps (not applicable here
 //         // since we don't swap, but good practice to keep)
+        
+
 //         if (sender == address(this)) return (BaseHook.afterSwap.selector, 0);
 
 //         PoolId poolId = key.toId();
@@ -185,26 +192,20 @@
 //         int24 prevTick = lastTick[poolId];
 //         lastTick[poolId] = currentTick;
 
-//         if (currentTick == prevTick) return (BaseHook.afterSwap.selector, 0);
+//         if (currentTick == prevTick) {
+//             return (BaseHook.afterSwap.selector, 0);
+//         }
 
 //         int24 spacing = key.tickSpacing;
 
 //         if (currentTick > prevTick) {
-//             // Price went UP → settle buyers (zeroForOne=true)
-//             for (
-//                 int24 tick = prevTick;
-//                 tick < currentTick;
-//                 tick += spacing
-//             ) {
+//             int24 startTick = _roundTickDown(prevTick, spacing);
+//             for (int24 tick = startTick; tick <= currentTick; tick += spacing) {
 //                 _settleAtTick(poolId, key, tick);
 //             }
 //         } else {
-//             // Price went DOWN → settle sellers (zeroForOne=false)
-//             for (
-//                 int24 tick = prevTick;
-//                 tick > currentTick;
-//                 tick -= spacing
-//             ) {
+//             int24 startTick = _roundTickDown(prevTick, spacing);
+//             for (int24 tick = startTick; tick >= currentTick; tick -= spacing) {
 //                 _settleAtTick(poolId, key, tick);
 //             }
 //         }
@@ -287,6 +288,7 @@
 //         externalEuint64 encAmountIn,
 //         bytes calldata amountInProof
 //     ) external nonReentrant returns (bytes32 orderId) {
+
 //         int24 usableTick = _roundTickDown(tick, key.tickSpacing);
 //         PoolId poolId = key.toId();
 
@@ -295,7 +297,7 @@
 
 //         // Compute amountOut from tick price — plaintext math, no FHE cost
 //         // This is the on-chain price computation that makes VeilBook novel
-//         uint256 scaledPrice = _getScaledPriceAtTick(usableTick, zeroForOne);
+//         uint256 scaledPrice = getScaledPriceAtTick(usableTick, zeroForOne);
 
 //         // Compute encrypted amountOut = amountIn * scaledPrice / PRICE_SCALE
 //         // FHE.mul(euint64, plaintext_uint64) is cheaper than euint64 * euint64
@@ -306,9 +308,9 @@
 
 //         );
 
-//         // Buyer  (zeroForOne=true)  deposits currency1
-//         // Seller (zeroForOne=false) deposits currency0
-//         Currency depositCurrency = zeroForOne ? key.currency1 : key.currency0;
+//         // Buyer  (zeroForOne=true)  deposits currency0
+//         // Seller (zeroForOne=false) deposits currency1
+//         Currency depositCurrency = zeroForOne ? key.currency0 : key.currency1;
 //         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][depositCurrency];
 //         if (address(encToken) == address(0)) revert PoolNotInitialized();
 
@@ -364,7 +366,7 @@
 //         OrderTypes.LimitOrder storage order = orders[orderId];
 //         if (order.owner == address(0)) revert OrderNotFound();
 //         if (order.owner != msg.sender) revert NotOrderOwner();
-//         if (!order.active)             revert OrderNotActive();
+//         if (!order.active) revert OrderNotActive();
 
 //         // Effects before interactions
 //         order.active = false;
@@ -373,7 +375,7 @@
 //         PoolId poolId = key.toId();
 
 //         // Deposit currency = what they originally locked
-//         Currency depositCurrency = order.zeroForOne ? key.currency1 : key.currency0;
+//         Currency depositCurrency = order.zeroForOne ? key.currency0 : key.currency1;
 //         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][depositCurrency];
 
 //         // Re-encrypt, burn, refund
@@ -416,7 +418,7 @@
 //         // Outgoing = opposite of deposit currency
 //         // Buyer  (zeroForOne=true)  deposited currency1 → receives currency0
 //         // Seller (zeroForOne=false) deposited currency0 → receives currency1
-//         Currency outCurrency = order.zeroForOne ? key.currency0 : key.currency1;
+//         Currency outCurrency = order.zeroForOne ? key.currency1 : key.currency0;
 //         PoolEncryptedToken encToken = poolEncryptedTokens[poolId][outCurrency];
 
 //         // Re-encrypt, burn, send
@@ -427,6 +429,8 @@
 
 //         emit OrderTypes.FillClaimed(orderId, msg.sender);
 //     }
+
+    
 
 //     // =============================================================
 //     //                     SETTLEMENT LOGIC
@@ -454,16 +458,24 @@
 //      * @param poolId  Pool being settled
 //      * @param key     Pool key
 //      * @param tick    Tick to settle
+     
 //      */
+
 //     function _settleAtTick(
 //         PoolId poolId,
 //         PoolKey calldata key,
 //         int24 tick
 //     ) internal {
-//         bytes32[] storage buyOrders  = orderBook[poolId][tick][true];
-//         bytes32[] storage sellOrders = orderBook[poolId][tick][false];
+       
+        
+//         bytes32[] storage sellOrders = orderBook[poolId][tick][true];   // selling token0
+//         bytes32[] storage buyOrders  = orderBook[poolId][tick][false];  // selling token1
 
 //         if (buyOrders.length == 0 || sellOrders.length == 0) return;
+//         // emit Debug("_settleAtTick called"); 
+
+//         // this wasnt emitted meaning the above if statement  returned;
+//         // I just read orderCount and the length is 1, so why is the if block returned early
 
 //         PoolEncryptedToken encToken0 = poolEncryptedTokens[poolId][key.currency0];
 //         PoolEncryptedToken encToken1 = poolEncryptedTokens[poolId][key.currency1];
@@ -479,6 +491,7 @@
 //         ) {
 //             OrderTypes.LimitOrder storage buy  = orders[buyOrders[bi]];
 //             OrderTypes.LimitOrder storage sell = orders[sellOrders[si]];
+//             emit Debug("matching pair");
 
 //             if (!buy.active)  { bi++; continue; }
 //             if (!sell.active) { si++; continue; }
@@ -520,9 +533,11 @@
 //             buy.filledOut  = newBuyFilledOut;
 
 //             // ── Token transfers ───────────────────────────────────────────
-//             // Seller locked currency0 → buyer receives it
-//             encToken0.hookTransfer(address(this), buy.owner,  fillIn);
-//             // Buyer locked currency1  → seller receives it
+
+//             // Seller (zeroForOne=true) locked currency0 → buyer receives currency0
+//             encToken0.hookTransfer(address(this), buy.owner, fillIn);
+
+//             // Buyer (zeroForOne=false) locked currency1 → seller receives currency1
 //             encToken1.hookTransfer(address(this), sell.owner, fillOut);
 
 //             emit OrderTypes.OrdersMatched(buyOrders[bi], sellOrders[si], tick);
@@ -536,6 +551,7 @@
 //     // =============================================================
 //     //                      VIEW FUNCTIONS
 //     // =============================================================
+
 
 //     function getUserOrders(address user) external view returns (bytes32[] memory) {
 //         return userOrders[user];
@@ -590,10 +606,10 @@
 //      * @param zeroForOne  Order direction
 //      * @return scaledPrice Price scaled by PRICE_SCALE for use in FHE.mul / FHE.div
 //      */
-//     function _getScaledPriceAtTick(
+//     function getScaledPriceAtTick(
 //         int24 tick,
 //         bool zeroForOne
-//     ) internal pure returns (uint256 scaledPrice) {
+//     ) public pure returns (uint256 scaledPrice) {
 //         uint160 sqrtPriceX96 = TickMath.getSqrtPriceAtTick(tick);
 
 //         // price = sqrtPriceX96^2 / 2^192, scaled by PRICE_SCALE

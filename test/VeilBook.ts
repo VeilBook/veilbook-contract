@@ -2,7 +2,6 @@ import { expect } from "chai";
 import { ethers, fhevm, network } from "hardhat";
 import { Contract, Signer, ZeroAddress } from "ethers";
 import type { MockERC20, VeilBook } from "../types";
-import { PoolEncryptedToken__factory } from "../types";
 import { FhevmType } from "@fhevm/hardhat-plugin";
 
 // ── Uniswap V4 ABIs we need ───────────────────────────────────────────────────
@@ -18,6 +17,13 @@ const MODIFY_LIQUIDITY_ROUTER_ABI = [
 
 const SWAP_ROUTER_ABI = [
   "function swap(tuple(address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) key, tuple(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96) params, tuple(bool takeClaims, bool settleUsingBurn) testSettings, bytes hookData) external payable returns (tuple(int256 currency0, int256 currency1))",
+];
+
+const STATE_VIEW_ABI = [
+  "function getSlot0(bytes32 poolId) external view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)",
+  "function getLiquidity(bytes32 poolId) external view returns (uint128 liquidity)",
+  "function getTickBitmap(bytes32 poolId, int16 wordPosition) external view returns (uint256 tickBitmap)",
+  "function getTickInfo(bytes32 poolId, int24 tick) external view returns (uint128 liquidityGross, int128 liquidityNet, uint256 feeGrowthOutside0X128, uint256 feeGrowthOutside1X128)"
 ];
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -66,6 +72,16 @@ function getPoolId(key: ReturnType<typeof encodePoolKey>): string {
   );
 }
 
+function tickToPrice(tick: number): number {
+  return Math.pow(1.0001, tick);
+}
+
+function tickToSqrtPriceX96(tick: number): bigint {
+  const price = Math.pow(1.0001, tick);
+  const sqrtPrice = Math.sqrt(price);
+  return BigInt(Math.floor(sqrtPrice * 2**96));
+}
+
 // =============================================================================
 //                              TEST SUITE
 // =============================================================================
@@ -85,6 +101,7 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
 
   // ── Contracts ─────────────────────────────────────────────────────────────
   let poolManager: Contract;
+  let stateView: Contract;
   let modifyLiquidityRouter: Contract;
   let swapRouter: Contract;
   let hook: VeilBook;
@@ -101,8 +118,8 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
   // Using 6-decimal tokens so amounts fit in euint64
   // 1 token = 1_000_000 (1e6)
   const SELLER_DEPOSIT = ethers.parseUnits("1", 6);    // 1 TOKEN0 (e.g. WETH with 6 dec)
-  const BUYER_DEPOSIT  = ethers.parseUnits("20", 6); // 20 TOKEN1 (e.g. USDC)
-  const LIQUIDITY_AMOUNT = ethers.parseUnits("100000", 6);
+  const BUYER_DEPOSIT  = ethers.parseUnits("5", 6); // 20 TOKEN1 (e.g. USDC)
+  const LIQUIDITY_AMOUNT = ethers.parseUnits("1000000", 6);
 
   const ORDER_TICK = 60; // valid for tickSpacing=60
 
@@ -143,7 +160,7 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
       "PoolManager",
       deployer
     );
-    const poolManagerContract = await PoolManagerFactory.deploy(deployer);
+    const poolManagerContract = await PoolManagerFactory.deploy(await deployer.getAddress());
     await poolManagerContract.waitForDeployment();
     poolManager = new ethers.Contract(
       await poolManagerContract.getAddress(),
@@ -154,9 +171,6 @@ describe("VeilBook — ConfidentialLimitOrderHook", function () {
 
     console.log("PoolManager deployed at:", poolManagerAddress);
 
-    // const PoolEncryptedTokenFactory = (await ethers.getContractFactory("PoolEncryptedToken")) as PoolEncryptedToken__factory;
-    // const PoolEncryptedTokenContract = await PoolEncryptedTokenFactory.deploy(); 
-    // const CWETHContractAddress = await CWETHContract.getAddress();
 
     // deploy VeilBookHook
 //.............................................................................................
@@ -191,8 +205,8 @@ console.log("VeilBookFactory address:", hookFactoryAddress);
 //   }
 // }
 // hookAddress = finalAddress;
-hookAddress = "0x43feAA8660cE2F3c50E2fCBf76b6fa7e36c6d040";
-let salt: string = ethers.zeroPadValue(ethers.toBeHex(80631), 32)
+hookAddress = "0x8c023776bA02c85B53B5C468F1F43c0dc1d15040";
+let salt: string = ethers.zeroPadValue(ethers.toBeHex(14601), 32)
 await hookFactoryContract.deploy(poolManagerAddress, salt);
 console.log(`VeilBook Hook deployed at: ${hookAddress} and salt = ${salt}`);
 
@@ -204,6 +218,21 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   
 
 //.............................................................................................
+
+ // Deploy StateView
+
+ const stateViewFactory = await ethers.getContractFactory("StateView");
+ const stateViewFactoryContract = await stateViewFactory.deploy(poolManagerAddress);
+ await stateViewFactoryContract.waitForDeployment();
+ const stateViewContractAddress = await stateViewFactoryContract.getAddress();
+ stateView = new ethers.Contract(
+   await stateViewFactoryContract.getAddress(),
+   STATE_VIEW_ABI,
+   deployer
+ );
+ console.log("StateView contract address:", stateViewContractAddress);
+
+
 
     // ── 2. Deploy MockERC20 tokens (6 decimals) ───────────────────────────
     const MockERC20Factory = await ethers.getContractFactory("MockERC20");
@@ -289,14 +318,14 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
     // Tight range around current tick
     await modifyLiquidityRouter.modifyLiquidity(
       poolKey,
-      { tickLower: -120, tickUpper: 120, liquidityDelta: ethers.parseUnits("100", 6), salt: ethers.ZeroHash },
+      { tickLower: -120, tickUpper: 120, liquidityDelta: ethers.parseUnits("1000", 6), salt: ethers.ZeroHash },
       "0x"
     );
 
     // Wide range for full coverage
     await modifyLiquidityRouter.modifyLiquidity(
       poolKey,
-      { tickLower: -6000, tickUpper: 6000, liquidityDelta: ethers.parseUnits("100", 6), salt: ethers.ZeroHash },
+      { tickLower: -6000, tickUpper: 6000, liquidityDelta: ethers.parseUnits("10000", 6), salt: ethers.ZeroHash },
       "0x"
     );
 
@@ -655,13 +684,38 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //   let buyerOrderId: string;
 
   //   before(async function () {
+  //     const lastTick = await hook.lastTick(poolId);
+  //     console.log("lastTick at start of test:", lastTick.toString());
   //     // Fresh deposits and orders for settlement tests
   //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT * 5n);
   //     await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT  * 5n);
 
+  //     const encryptedToken0Address = await hook.getEncryptedToken(poolId, token0Address);
+  //     const encryptedToken1Address = await hook.getEncryptedToken(poolId, token1Address);
+
+  //     const encryptedToken0Contract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedToken0Address
+  //     );
+  //     const encryptedToken1Contract = await ethers.getContractAt(
+  //       "PoolEncryptedToken",
+  //       encryptedToken1Address
+  //     );
+
+  //     const until = Math.floor(Date.now() / 1000) + 1000000;
+  //     await encryptedToken0Contract.connect(seller).setOperator(hookAddress, until);
+  //     await encryptedToken1Contract.connect(buyer).setOperator(hookAddress, until);
+
+  //     const encryptedInput0 = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+  //     .add64(SELLER_DEPOSIT * 5n)
+  //     .encrypt();
+  //     const encryptedInput1 = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
+  //     .add64(BUYER_DEPOSIT  * 5n)
+  //     .encrypt();
+
   //     // Place sell order at tick 60
   //     let tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
+  //       poolKey, ORDER_TICK, true, encryptedInput0.handles[0], encryptedInput0.inputProof
   //     );
   //     let receipt = await tx.wait();
   //     let event = receipt?.logs.find((log: any) => {
@@ -672,7 +726,7 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
 
   //     // Place buy order at tick 60
   //     tx = await hook.connect(buyer).placeOrder(
-  //       poolKey, ORDER_TICK, true, ethers.ZeroHash, "0x"
+  //       poolKey, ORDER_TICK, false, encryptedInput1.handles[0], encryptedInput1.inputProof
   //     );
   //     receipt = await tx.wait();
   //     event = receipt?.logs.find((log: any) => {
@@ -685,194 +739,244 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //     console.log("    Buyer  order:", buyerOrderId);
   //   });
 
-  //   it("should update lastTick after swap", async function () {
-  //     const tickBefore = await hook.lastTick(poolId);
-  //     console.log("    Tick before swap:", tickBefore.toString());
+    // it("should update lastTick after swap", async function () {
+    //   const tickBefore = await hook.lastTick(poolId);
+    //   console.log("    Tick before swap:", tickBefore.toString());
 
-  //     // Swap token1 → token0 (price goes UP)
-  //     await swapRouter.swap(
-  //       poolKey,
-  //       {
-  //         zeroForOne: false,
-  //         amountSpecified: -BUYER_DEPOSIT,
-  //         sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
-  //       },
-  //       { takeClaims: false, settleUsingBurn: false },
-  //       "0x"
-  //     );
+    //   // Swap token1 → token0 (price goes UP)
+    //   await swapRouter.swap(
+    //     poolKey,
+    //     {
+    //       zeroForOne: false,
+    //       amountSpecified: -BUYER_DEPOSIT,
+    //       sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
+    //     },
+    //     { takeClaims: false, settleUsingBurn: false },
+    //     "0x"
+    //   );
 
-  //     const tickAfter = await hook.lastTick(poolId);
-  //     console.log("    Tick after swap:", tickAfter.toString());
+    //   const tickAfter = await hook.lastTick(poolId);
+    //   console.log("    Tick after swap:", tickAfter.toString());
 
-  //     // lastTick should update after swap
-  //     expect(tickAfter).to.not.equal(tickBefore);
-  //   });
+    //   // lastTick should update after swap
+    //   expect(tickAfter).to.not.equal(tickBefore);
+    // });
 
-  //   it("should trigger settlement when price crosses order tick", async function () {
-  //     // Get current tick from PoolManager
-  //     const slot0 = await poolManager.getSlot0(poolId);
-  //     console.log("\n    Current tick:", slot0.tick.toString());
+    // it("should trigger settlement when price crosses order tick", async function () {
+    //   // Get current tick from PoolManager
+    //   const slot0 = await stateView.getSlot0(poolId);
+    //   console.log("\n    Current tick:", slot0.tick.toString());
 
-  //     // Swap up past tick 60 — this crosses our ORDER_TICK
-  //     const swapTx = await swapRouter.swap(
-  //       poolKey,
-  //       {
-  //         zeroForOne: false, // sell token1, buy token0 → price UP
-  //         amountSpecified: -(BUYER_DEPOSIT * 10n),
-  //         sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
-  //       },
-  //       { takeClaims: false, settleUsingBurn: false },
-  //       "0x"
-  //     );
-  //     const receipt = await swapTx.wait();
+    //   // Swap up past tick 60 — this crosses our ORDER_TICK
+    //   const swapTx = await swapRouter.swap(
+    //     poolKey,
+    //     {
+    //       zeroForOne: false, // sell token1, buy token0 → price UP
+    //       amountSpecified: -(BUYER_DEPOSIT * 10n),
+    //       sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
+    //     },
+    //     { takeClaims: false, settleUsingBurn: false },
+    //     "0x"
+    //   );
+    //   const receipt = await swapTx.wait();
 
-  //     // Check for OrdersMatched event
-  //     const matchedEvents = receipt?.logs.filter((log: any) => {
-  //       try {
-  //         return hook.interface.parseLog(log)?.name === "OrdersMatched";
-  //       } catch { return false; }
-  //     });
+    //   // Check for OrdersMatched and Debug event
+ 
+    //   const matchedEvents = receipt?.logs
+    //   .map((log: any) => {
+    //     try {
+    //       return hook.interface.parseLog(log);
+    //     } catch { return null; }
+    //   })
+    //   .filter((e: any) => e?.name === "OrdersMatched");
+    //   const debugEvents = receipt?.logs
+    //   .map((log: any) => {
+    //     try {
+    //       return hook.interface.parseLog(log);
+    //     } catch { return null; }
+    //   })
+    //   .filter((e: any) => e?.name === "Debug");
 
-  //     const slot0After = await poolManager.getSlot0(poolId);
-  //     console.log("    Tick after swap:", slot0After.tick.toString());
-  //     console.log("    OrdersMatched events:", matchedEvents?.length ?? 0);
-  //   });
+    //   for (const log of debugEvents) {
+    //     const message = log.args.message;
+    //     console.log("Message:", message);
+    //   }
 
-  //   it("should not settle orders at untouched ticks", async function () {
-  //     // Place order at far tick
-  //     const farTick = 300;
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     const tx = await hook.connect(seller).placeOrder(
-  //       poolKey, farTick, false, ethers.ZeroHash, "0x"
-  //     );
-  //     await tx.wait();
+    //   const slot0After = await stateView.getSlot0(poolId);
+    //   console.log("    Tick after swap:", slot0After.tick.toString());
+    //   console.log("    OrdersMatched events:", matchedEvents?.length ?? 0);
+    //   console.log("    Debug events:", debugEvents?.length ?? 0);
+    //   console.log(" Get order count")
 
-  //     const countBefore = await hook.getOrderCount(
-  //       poolId,
-  //       60, // rounded from 300 = 300 (300 % 60 = 0)
-  //       false
-  //     );
 
-  //     // Small swap that won't reach tick 300
-  //     await swapRouter.swap(
-  //       poolKey,
-  //       {
-  //         zeroForOne: false,
-  //         amountSpecified: -(BUYER_DEPOSIT / 100n),
-  //         sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
-  //       },
-  //       { takeClaims: false, settleUsingBurn: false },
-  //       "0x"
-  //     );
+    //   const sellCount = await hook.getOrderCount(poolId, 60, true);  // zeroForOne=true (seller)
+    //   const buyCount  = await hook.getOrderCount(poolId, 60, false); // zeroForOne=false (buyer)
+    //   console.log("Sell orders at tick 60:", sellCount.toString());
+    //   console.log("Buy orders at tick 60:", buyCount.toString());
 
-  //     const slot0 = await poolManager.getSlot0(poolId);
-  //     console.log("\n    Tick after small swap:", slot0.tick.toString());
+    //   const sellerOrder = await hook.getOrder(sellerOrderId);
+    //   const buyerOrder  = await hook.getOrder(buyerOrderId);
+    //   console.log("Seller order tick:", sellerOrder.tick.toString());
+    //   console.log("Buyer order tick:",  buyerOrder.tick.toString());
+    // });
 
-  //     // Order count at far tick should be unchanged
-  //     const countAfter = await hook.getOrderCount(poolId, farTick, false);
-  //     expect(countAfter).to.equal(countBefore > 0n ? countBefore : 1n);
-  //   });
+    // it("should settle sell orders when price goes up", async function () {
 
-  //   it("should settle sell orders when price moves DOWN", async function () {
-  //     const negTick = -60;
+    //   const slot0Before = await stateView.getSlot0(poolId);
+    //   console.log("\n    Tick before down swap:", slot0Before.tick.toString());
 
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT);
-  //     await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT);
+    //   const swapTx = await swapRouter.swap(
+    //     poolKey,
+    //     {
+    //       zeroForOne: false, // sell token1 → price UP, do the everse later
+    //       amountSpecified: -(BUYER_DEPOSIT * 10n),
+    //       sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
+    //     },
+    //     { takeClaims: false, settleUsingBurn: false },
+    //     "0x"
+    //   );
+    //   const receipt = await swapTx.wait();
 
-  //     await hook.connect(seller).placeOrder(poolKey, negTick, false, ethers.ZeroHash, "0x");
-  //     await hook.connect(buyer).placeOrder(poolKey,  negTick, true,  ethers.ZeroHash, "0x");
+    //   const slot0After = await stateView.getSlot0(poolId);
+    //   console.log("Tick after down swap:", slot0After.tick.toString());
+    //   expect(slot0After.tick).to.be.gt(slot0Before.tick);
 
-  //     const slot0Before = await poolManager.getSlot0(poolId);
-  //     console.log("\n    Tick before down swap:", slot0Before.tick.toString());
 
-  //     // Swap token0 → token1 (price goes DOWN)
-  //     // Need token0 in deployer wallet for this swap
-  //     await token0.mint(await deployer.getAddress(), SELLER_DEPOSIT * 20n);
-  //     await token0.approve(await swapRouter.getAddress(), ethers.MaxUint256);
+    //   const matchedEvents = receipt?.logs
+    //   .map((log: any) => {
+    //     try {
+    //       return hook.interface.parseLog(log);
+    //     } catch { return null; }
+    //   })
+    //   .filter((e: any) => e?.name === "OrdersMatched");
+    //   console.log("OrdersMatched events:", matchedEvents?.length ?? 0);
 
-  //     const swapTx = await swapRouter.swap(
-  //       poolKey,
-  //       {
-  //         zeroForOne: true, // sell token0 → price DOWN
-  //         amountSpecified: -(SELLER_DEPOSIT * 10n),
-  //         sqrtPriceLimitX96: MIN_SQRT_PRICE + 1n,
-  //       },
-  //       { takeClaims: false, settleUsingBurn: false },
-  //       "0x"
-  //     );
-  //     const receipt = await swapTx.wait();
-
-  //     const slot0After = await poolManager.getSlot0(poolId);
-  //     console.log("    Tick after down swap:", slot0After.tick.toString());
-  //     expect(slot0After.tick).to.be.lt(slot0Before.tick);
-
-  //     const matchedEvents = receipt?.logs.filter((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrdersMatched"; }
-  //       catch { return false; }
-  //     });
-  //     console.log("    OrdersMatched events:", matchedEvents?.length ?? 0);
-  //   });
+    //   for (const log of matchedEvents) {
+    //     const output = log.args;
+    //     console.log({buyOrderId: output.buyOrderId, sellOrderId: output.sellOrderId, tick: output.tick});
+    //   }
+      
+    // });
   // });
 
   // ==========================================================================
   //                        CLAIM FILL TESTS
   // ==========================================================================
 
-  // describe("claimFill()", function () {
-  //   let claimSellerOrderId: string;
-  //   let claimBuyerOrderId: string;
+  describe("claimFill()", function () {
+    let claimSellerOrderId: string;
+    let claimBuyerOrderId: string;
 
-  //   before(async function () {
-  //     // Fresh setup for claim tests
-  //     await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT * 5n);
-  //     await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT  * 5n);
+    before(async function () {
+      // Fresh setup for claim tests
+      const lastTick = await hook.lastTick(poolId);
+      console.log("lastTick at start of test:", lastTick.toString());
+      // Fresh deposits and orders for settlement tests
+      await hook.connect(seller).deposit(poolKey, token0Address, SELLER_DEPOSIT * 5n); //1*5=5
+      await hook.connect(buyer).deposit(poolKey,  token1Address, BUYER_DEPOSIT  * 5n); //5*5=25
 
-  //     let tx = await hook.connect(seller).placeOrder(
-  //       poolKey, ORDER_TICK, false, ethers.ZeroHash, "0x"
-  //     );
-  //     let receipt = await tx.wait();
-  //     let event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     claimSellerOrderId = hook.interface.parseLog(event!)!.args.orderId;
+      const encryptedToken0Address = await hook.getEncryptedToken(poolId, token0Address);
+      const encryptedToken1Address = await hook.getEncryptedToken(poolId, token1Address);
 
-  //     tx = await hook.connect(buyer).placeOrder(
-  //       poolKey, ORDER_TICK, true, ethers.ZeroHash, "0x"
-  //     );
-  //     receipt = await tx.wait();
-  //     event = receipt?.logs.find((log: any) => {
-  //       try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
-  //       catch { return false; }
-  //     });
-  //     claimBuyerOrderId = hook.interface.parseLog(event!)!.args.orderId;
+      const encryptedToken0Contract = await ethers.getContractAt(
+        "PoolEncryptedToken",
+        encryptedToken0Address
+      );
+      const encryptedToken1Contract = await ethers.getContractAt(
+        "PoolEncryptedToken",
+        encryptedToken1Address
+      );
 
-  //     // Trigger settlement with large swap
-  //     await swapRouter.swap(
-  //       poolKey,
-  //       {
-  //         zeroForOne: false,
-  //         amountSpecified: -(BUYER_DEPOSIT * 20n),
-  //         sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
-  //       },
-  //       { takeClaims: false, settleUsingBurn: false },
-  //       "0x"
-  //     );
-  //   });
+      const until = Math.floor(Date.now() / 1000) + 1000000;
+      await encryptedToken0Contract.connect(seller).setOperator(hookAddress, until);
+      await encryptedToken1Contract.connect(buyer).setOperator(hookAddress, until);
 
-  //   it("seller should receive token1 after claimFill", async function () {
-  //     const balBefore = await token1.balanceOf(sellerAddress);
-  //     console.log("\n    Seller token1 before claim:", ethers.formatUnits(balBefore, 6));
+      const encryptedInput0 = await fhevm.createEncryptedInput(hookAddress, sellerAddress)
+      .add64(SELLER_DEPOSIT * 5n)
+      .encrypt();
+      const encryptedInput1 = await fhevm.createEncryptedInput(hookAddress, buyerAddress)
+      .add64(BUYER_DEPOSIT  * 5n)
+      .encrypt();
 
-  //     // Hardcoded filledOut — in real usage decrypt via Zama Relayer
-  //     // Seller's filledOut = BUYER_DEPOSIT (received USDC from buyer)
-  //     await hook.connect(seller).claimFill(claimSellerOrderId, BUYER_DEPOSIT);
+      // Place sell order at tick 60
+      let tx = await hook.connect(seller).placeOrder(
+        poolKey, ORDER_TICK, true, encryptedInput0.handles[0], encryptedInput0.inputProof
+      );
+      let receipt = await tx.wait();
+      let event = receipt?.logs.find((log: any) => {
+        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+        catch { return false; }
+      });
+      claimSellerOrderId = hook.interface.parseLog(event!)!.args.orderId;
 
-  //     const balAfter = await token1.balanceOf(sellerAddress);
-  //     console.log("    Seller token1 after claim:", ethers.formatUnits(balAfter, 6));
+      // Place buy order at tick 60
+      tx = await hook.connect(buyer).placeOrder(
+        poolKey, ORDER_TICK, false, encryptedInput1.handles[0], encryptedInput1.inputProof
+      );
+      receipt = await tx.wait();
+      event = receipt?.logs.find((log: any) => {
+        try { return hook.interface.parseLog(log)?.name === "OrderPlaced"; }
+        catch { return false; }
+      });
+      claimBuyerOrderId = hook.interface.parseLog(event!)!.args.orderId;
 
-  //     expect(balAfter - balBefore).to.equal(BUYER_DEPOSIT);
-  //   });
+      console.log("\n    Seller order:", claimSellerOrderId);
+      console.log("    Buyer  order:", claimBuyerOrderId);
+
+    });
+
+    it("seller should receive token1 after claimFill", async function () {
+      const sellerBalBefore = await token1.balanceOf(sellerAddress);
+      const buyerBalBefore = await token0.balanceOf(buyerAddress);
+      console.log("\n    Seller token1 before claim:", ethers.formatUnits(sellerBalBefore, 6));
+      console.log("\n    Buyer token0 before claim:", ethers.formatUnits(buyerBalBefore, 6));
+
+        // Swap token1 → token0 (price goes UP)
+      const slot0Before = await stateView.getSlot0(poolId);
+      console.log("\n    Tick before swap:", slot0Before.tick.toString());
+      await swapRouter.swap(
+        poolKey,
+        {
+          zeroForOne: false,
+          amountSpecified: -(BUYER_DEPOSIT * 10n),
+          sqrtPriceLimitX96: MAX_SQRT_PRICE - 1n,
+        },
+        { takeClaims: false, settleUsingBurn: false },
+        "0x"
+      );
+      // get current tick
+      // convert to price
+      const slot0After = await stateView.getSlot0(poolId);
+      console.log("\n    Tick after swap:", slot0After.tick.toString());
+
+      // get and decrypt order
+      const encSellerOrder = await hook.connect(seller).getOrder(claimSellerOrderId);
+      console.log({sellerFilledOut: encSellerOrder.filledOut});
+      const encBuyerOrder = await hook.connect(buyer).getOrder(claimBuyerOrderId);
+      console.log({BuyerFilledOut: encBuyerOrder.filledOut});
+
+      const sellerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encSellerOrder.filledOut, hookAddress, seller);
+      const buyerClearFilledOut = await fhevm.userDecryptEuint(FhevmType.euint64, encBuyerOrder.filledOut, hookAddress, buyer);
+      console.log({sellerClearFilledOut});
+      console.log({buyerClearFilledOut});
+
+      const sellerPrice = await hook.getScaledPriceAtTick(60, true);  // seller direction
+      const buyerPrice  = await hook.getScaledPriceAtTick(60, false); // buyer direction
+      console.log("seller scaledPrice:", sellerPrice.toString());
+      console.log("buyer scaledPrice:", buyerPrice.toString());
+
+      // Seller's filledOut = BUYER_DEPOSIT (received TOKEN1 from buyer)
+      await hook.connect(seller).claimFill(claimSellerOrderId, sellerClearFilledOut);
+      await hook.connect(buyer).claimFill(claimBuyerOrderId, buyerClearFilledOut);
+
+      const sellerBalAfter = await token1.balanceOf(sellerAddress);
+      const buyerBalAfter = await token0.balanceOf(buyerAddress);
+      console.log("\n    Seller token1 after claim:", ethers.formatUnits(sellerBalAfter, 6));
+      console.log("\n    Buyer token0 after claim:", ethers.formatUnits(buyerBalAfter, 6));
+
+
+      // expect(balAfter - balBefore).to.equal(BUYER_DEPOSIT);
+    });
 
   //   it("buyer should receive token0 after claimFill", async function () {
   //     const balBefore = await token0.balanceOf(buyerAddress);
@@ -926,7 +1030,7 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //       hook.connect(seller).claimFill(ethers.ZeroHash, SELLER_DEPOSIT)
   //     ).to.be.revertedWithCustomError(hook, "OrderNotFound");
   //   });
-  // });
+  });
 
   // ==========================================================================
   //                         VIEW FUNCTION TESTS
@@ -1080,3 +1184,6 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
   //   });
   // });
 });
+
+
+

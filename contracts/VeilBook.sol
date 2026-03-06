@@ -18,7 +18,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {FHE, externalEuint64, euint64, ebool} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
@@ -26,6 +25,7 @@ import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {PoolEncryptedToken} from "./tokens/PoolEncryptedToken.sol";
 import {OrderTypes} from "./libraries/OrderTypes.sol";
 import {FHEPermissions} from "./libraries/FHEPermissions.sol";
+
 
 /**
  * @title VeilBook
@@ -49,8 +49,7 @@ import {FHEPermissions} from "./libraries/FHEPermissions.sol";
 contract VeilBook is
     BaseHook,
     ReentrancyGuard,
-    ZamaEthereumConfig,
-    Ownable2Step
+    ZamaEthereumConfig
 {
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;
@@ -67,6 +66,10 @@ contract VeilBook is
     error InvalidAmount();
     error InvalidCurrency();
     error PoolNotInitialized();
+
+    // Add these temporary debug events at the top of your contract
+    event Debug(string message);
+
 
     // =============================================================
     //                        STATE VARIABLES
@@ -99,7 +102,7 @@ contract VeilBook is
 
     /// @notice Price scaling factor for fixed-point arithmetic
     /// Using 1e18 as scale — FullMath.mulDiv handles overflow safely
-    uint256 private constant PRICE_SCALE = 1e18;
+    uint256 private constant PRICE_SCALE = 1e6;
 
     // =============================================================
     //                        CONSTRUCTOR
@@ -107,7 +110,6 @@ contract VeilBook is
 
     constructor(IPoolManager _poolManager)
         BaseHook(_poolManager)
-        Ownable(msg.sender)
     {}
 
     // =============================================================
@@ -178,6 +180,8 @@ contract VeilBook is
     ) internal override returns (bytes4, int128) {
         // Avoid re-entrancy from hook-initiated swaps (not applicable here
         // since we don't swap, but good practice to keep)
+        
+
         if (sender == address(this)) return (BaseHook.afterSwap.selector, 0);
 
         PoolId poolId = key.toId();
@@ -185,26 +189,20 @@ contract VeilBook is
         int24 prevTick = lastTick[poolId];
         lastTick[poolId] = currentTick;
 
-        if (currentTick == prevTick) return (BaseHook.afterSwap.selector, 0);
+        if (currentTick == prevTick) {
+            return (BaseHook.afterSwap.selector, 0);
+        }
 
         int24 spacing = key.tickSpacing;
 
         if (currentTick > prevTick) {
-            // Price went UP → settle buyers (zeroForOne=true)
-            for (
-                int24 tick = prevTick;
-                tick < currentTick;
-                tick += spacing
-            ) {
+            int24 startTick = _roundTickDown(prevTick, spacing);
+            for (int24 tick = startTick; tick <= currentTick; tick += spacing) {
                 _settleAtTick(poolId, key, tick);
             }
         } else {
-            // Price went DOWN → settle sellers (zeroForOne=false)
-            for (
-                int24 tick = prevTick;
-                tick > currentTick;
-                tick -= spacing
-            ) {
+            int24 startTick = _roundTickDown(prevTick, spacing);
+            for (int24 tick = startTick; tick >= currentTick; tick -= spacing) {
                 _settleAtTick(poolId, key, tick);
             }
         }
@@ -296,7 +294,7 @@ contract VeilBook is
 
         // Compute amountOut from tick price — plaintext math, no FHE cost
         // This is the on-chain price computation that makes VeilBook novel
-        uint256 scaledPrice = _getScaledPriceAtTick(usableTick, zeroForOne);
+        uint256 scaledPrice = getScaledPriceAtTick(usableTick, zeroForOne);
 
         // Compute encrypted amountOut = amountIn * scaledPrice / PRICE_SCALE
         // FHE.mul(euint64, plaintext_uint64) is cheaper than euint64 * euint64
@@ -429,6 +427,8 @@ contract VeilBook is
         emit OrderTypes.FillClaimed(orderId, msg.sender);
     }
 
+    
+
     // =============================================================
     //                     SETTLEMENT LOGIC
     // =============================================================
@@ -455,17 +455,24 @@ contract VeilBook is
      * @param poolId  Pool being settled
      * @param key     Pool key
      * @param tick    Tick to settle
+     
      */
+
     function _settleAtTick(
         PoolId poolId,
         PoolKey calldata key,
         int24 tick
     ) internal {
+       
         
         bytes32[] storage sellOrders = orderBook[poolId][tick][true];   // selling token0
         bytes32[] storage buyOrders  = orderBook[poolId][tick][false];  // selling token1
 
         if (buyOrders.length == 0 || sellOrders.length == 0) return;
+        // emit Debug("_settleAtTick called"); 
+
+        // this wasnt emitted meaning the above if statement  returned;
+        // I just read orderCount and the length is 1, so why is the if block returned early
 
         PoolEncryptedToken encToken0 = poolEncryptedTokens[poolId][key.currency0];
         PoolEncryptedToken encToken1 = poolEncryptedTokens[poolId][key.currency1];
@@ -481,6 +488,7 @@ contract VeilBook is
         ) {
             OrderTypes.LimitOrder storage buy  = orders[buyOrders[bi]];
             OrderTypes.LimitOrder storage sell = orders[sellOrders[si]];
+            emit Debug("matching pair");
 
             if (!buy.active)  { bi++; continue; }
             if (!sell.active) { si++; continue; }
@@ -541,6 +549,7 @@ contract VeilBook is
     //                      VIEW FUNCTIONS
     // =============================================================
 
+
     function getUserOrders(address user) external view returns (bytes32[] memory) {
         return userOrders[user];
     }
@@ -594,26 +603,29 @@ contract VeilBook is
      * @param zeroForOne  Order direction
      * @return scaledPrice Price scaled by PRICE_SCALE for use in FHE.mul / FHE.div
      */
-    function _getScaledPriceAtTick(
+    function getScaledPriceAtTick(
         int24 tick,
         bool zeroForOne
-    ) internal pure returns (uint256 scaledPrice) {
+    ) public pure returns (uint256 scaledPrice) {
         uint160 sqrtPriceX96 = TickMath.getSqrtPriceAtTick(tick);
 
         // price = sqrtPriceX96^2 / 2^192, scaled by PRICE_SCALE
-        // FullMath.mulDiv handles the overflow from squaring sqrtPriceX96
+        // Use FullMath.mulDiv for BOTH the squaring and scaling to avoid overflow
         uint256 price = FullMath.mulDiv(
-            uint256(sqrtPriceX96) * uint256(sqrtPriceX96),
+            FullMath.mulDiv(
+                uint256(sqrtPriceX96),
+                uint256(sqrtPriceX96),
+                1 << 96          // divide out one 2^96
+            ),
             PRICE_SCALE,
-            1 << 192
+            1 << 96              // divide out the second 2^96
         );
 
-        if (!zeroForOne) {
-            // Seller (currency0 → currency1): amountOut = amountIn * price / PRICE_SCALE
+        if (zeroForOne) {
             scaledPrice = price;
         } else {
-            // Buyer (currency1 → currency0): amountOut = amountIn * PRICE_SCALE / price
-            // Invert: return PRICE_SCALE^2 / price so the mul/div in placeOrder works correctly
+            // Guard against price = 0 (extreme negative ticks)
+            require(price > 0, "price underflow");
             scaledPrice = FullMath.mulDiv(PRICE_SCALE, PRICE_SCALE, price);
         }
     }
