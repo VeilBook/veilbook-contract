@@ -3,25 +3,13 @@ import { ethers } from "hardhat";
 async function main() {
 
   const [deployer] = await ethers.getSigners();
-  console.log("Deploying contracts with account:", deployer.address);
-  let poolManagerAddress ="";
+  console.log("Deployer Address: ", deployer.address)
   let hookAddress = "";
   let salt = "";
   let finalAddress: string = "";
 
 
-
-  // Deploy PoolManager
-  const PoolManagerFactory = await ethers.getContractFactory(
-    "PoolManager",
-    deployer
-  );
-  const poolManagerContract = await PoolManagerFactory.deploy(await deployer.getAddress());
-  await poolManagerContract.waitForDeployment();
-
-  poolManagerAddress = await poolManagerContract.getAddress();
-
-  console.log("PoolManager deployed at:", poolManagerAddress);
+  const poolManagerAddress = "0x1F6531C33e88d7eA0DfF8eAB7cBDbB19d64C6e20";
 
 
   const hookFactory = await ethers.getContractFactory("VeilBookFactory");
@@ -64,7 +52,10 @@ main()
     process.exit(1);
   });
 
-//npx hardhat run scripts/deployVeilBookHook.ts
-  // Found valid address at salt=14601
+//npx hardhat run scripts/deployVeilBookHook.ts --network sepolia
+
+// Deployer Address:  0x5Ac521f6814c2D09188A6838e7CDBfe7aEaC0cf9
+// VeilBookFactory address: 0x49DA1845977B92E2e6a6ba3953C5Cee6aEE4da4e
+// Found valid address at salt=12616: 0x203090B459Ce722f9F6467BC658F64B907e3D040
 // Flags: 0x1040
-// VeilBook Hook deployed at: 0x8c023776bA02c85B53B5C468F1F43c0dc1d15040
+// VeilBook Hook deployed at: 0x203090B459Ce722f9F6467BC658F64B907e3D040 and salt = 0x0000000000000000000000000000000000000000000000000000000000003148

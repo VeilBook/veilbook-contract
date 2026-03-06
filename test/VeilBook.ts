@@ -220,10 +220,10 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
     // ── 2. Deploy MockERC20 tokens (6 decimals) ───────────────────────────
     const MockERC20Factory = await ethers.getContractFactory("MockERC20");
 
-    const tokenA = await MockERC20Factory.deploy();
+    const tokenA = await MockERC20Factory.deploy("USDP Token", "USDP");
     await tokenA.waitForDeployment();
 
-    const tokenB = await MockERC20Factory.deploy();
+    const tokenB = await MockERC20Factory.deploy("USDM Token", "USDM");
     await tokenB.waitForDeployment();
 
     // Sort tokens so currency0 < currency1
