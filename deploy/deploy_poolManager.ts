@@ -22,6 +22,6 @@ func.id = "deploy_poolManager";
 func.tags = ["PoolManager"];
 func.dependencies = ["dependencies"];
 
-// npx hardhat deploy --tags PoolManager --network sepolia
+// npx hardhat deploy --tags PoolManager --network sepolia --reset
 // deployed on sepolia network
-// PoolManager deployed at: 0x1F6531C33e88d7eA0DfF8eAB7cBDbB19d64C6e20 
+// PoolManager deployed at: 0x19380Fd31d8044fB3349d9eaEFfF779Bf41f885D 

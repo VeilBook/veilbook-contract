@@ -188,8 +188,6 @@ for (let i = 0; i < 200000; i++) {
   }
 }
 hookAddress = finalAddress;
-// hookAddress = "0x8c023776bA02c85B53B5C468F1F43c0dc1d15040";
-// let salt: string = ethers.zeroPadValue(ethers.toBeHex(14601), 32)
 await hookFactoryContract.deploy(poolManagerAddress, salt);
 console.log(`VeilBook Hook deployed at: ${hookAddress} and salt = ${salt}`);
 
@@ -459,6 +457,7 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
 
     it("should store seller order with correct public fields", async function () {
       const order = await hook.getOrder(sellerOrderId);
+      console.log({order});
       expect(order.owner).to.equal(sellerAddress);
       expect(order.tick).to.equal(ORDER_TICK);
       expect(order.zeroForOne).to.equal(true);
@@ -787,9 +786,9 @@ hook = VeilBookHookFactory.attach(hookAddress) as unknown as VeilBook;
       }
 
       const slot0After = await stateView.getSlot0(poolId);
-      console.log("    Tick after swap:", slot0After.tick.toString());
-      console.log("    OrdersMatched events:", matchedEvents?.length ?? 0);
-      console.log("    Debug events:", debugEvents?.length ?? 0);
+      console.log("Tick after swap:", slot0After.tick.toString());
+      console.log("OrdersMatched events:", matchedEvents?.length ?? 0);
+      console.log("Debug events:", debugEvents?.length ?? 0);
       console.log(" Get order count")
 
 

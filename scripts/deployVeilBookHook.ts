@@ -9,7 +9,7 @@ async function main() {
   let finalAddress: string = "";
 
 
-  const poolManagerAddress = "0x1F6531C33e88d7eA0DfF8eAB7cBDbB19d64C6e20";
+  const poolManagerAddress = "0x19380Fd31d8044fB3349d9eaEFfF779Bf41f885D";
 
 
   const hookFactory = await ethers.getContractFactory("VeilBookFactory");
@@ -39,8 +39,6 @@ async function main() {
   }
 }
 hookAddress = finalAddress;
-// hookAddress = "0xB91AFBD725A68C738C0A1A37d2D5B9Dc829fd040";
-// let salt: string = ethers.zeroPadValue(ethers.toBeHex(11858), 32)
 await hookFactoryContract.deploy(poolManagerAddress, salt);
 console.log(`VeilBook Hook deployed at: ${hookAddress} and salt = ${salt}`);
 }
@@ -54,8 +52,8 @@ main()
 
 //npx hardhat run scripts/deployVeilBookHook.ts --network sepolia
 
-// Deployer Address:  0x5Ac521f6814c2D09188A6838e7CDBfe7aEaC0cf9
-// VeilBookFactory address: 0x49DA1845977B92E2e6a6ba3953C5Cee6aEE4da4e
-// Found valid address at salt=12616: 0x203090B459Ce722f9F6467BC658F64B907e3D040
+// VeilBookFactory address: 0x0f2005c708Cf14fDd827F068D8433ed0283ecEA9
+// Found valid address at salt=4685: 0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040
 // Flags: 0x1040
-// VeilBook Hook deployed at: 0x203090B459Ce722f9F6467BC658F64B907e3D040 and salt = 0x0000000000000000000000000000000000000000000000000000000000003148
+// VeilBook Hook deployed at: 0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040 and salt = 0x000000000000000000000000000000000000000000000000000000000000124d
+

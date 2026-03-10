@@ -5,23 +5,24 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployer } = await hre.getNamedAccounts();
   const { deploy } = hre.deployments;
 
-  console.log("\n=== Deploying StateView ===\n");
+  console.log("\n=== Deploying PoolSwapTest ===\n");
 
   const poolManagerAddress = "0x19380Fd31d8044fB3349d9eaEFfF779Bf41f885D";
-  const stateView = await deploy("StateView", {
-    contract: "StateView",
+
+  const PoolSwapTest = await deploy("PoolSwapTest", {
+    contract: "PoolSwapTest",
     from: deployer,
-    args: [poolManagerAddress], 
+    args: [poolManagerAddress], // owner
     log: true,
   });
-  console.log(`StateView deployed at: ${stateView.address}`);
+  console.log(`PoolSwapTest deployed at: ${PoolSwapTest.address}`);
 };
 
 export default func;
-func.id = "deploy_StateView";
-func.tags = ["StateView"];
+func.id = "deploy_PoolSwapTest";
+func.tags = ["PoolSwapTest"];
 func.dependencies = ["dependencies"];
 
-// npx hardhat deploy --tags StateView --network sepolia --reset
+// npx hardhat deploy --tags PoolSwapTest --network sepolia --reset
 // deployed on sepolia network
-// StateView deployed at: 0x626927daBdcff58d87643b666B65ce05ac85E9CA
+// PoolSwapTest deployed at: 0xEF02dEC3B6E81850974A39c7B18a9fB1BB5b1758

@@ -306,7 +306,7 @@ contract VeilBook is
         orderBook[poolId][usableTick][zeroForOne].push(orderId);
         userOrders[msg.sender].push(orderId);
 
-        emit OrderTypes.OrderPlaced(orderId, msg.sender, poolId, usableTick, zeroForOne);
+        emit OrderTypes.OrderPlaced(orderId, msg.sender, poolId, usableTick, zeroForOne);//
     }
 
     /**
@@ -498,13 +498,14 @@ contract VeilBook is
         int24 tick,
         bool zeroForOne,
         bool active,
-        euint64 amountIn,   // handle — decrypt client-side via Relayer + KMS
-        euint64 amountOut,  // handle — decrypt client-side via Relayer + KMS
-        euint64 filledIn,   // handle — decrypt client-side via Relayer + KMS
-        euint64 filledOut   // handle — decrypt client-side via Relayer + KMS
+        euint64 amountIn,  
+        euint64 amountOut, 
+        euint64 filledIn,   
+        euint64 filledOut,
+        PoolKey memory poolKey
     ) {
         OrderTypes.LimitOrder storage o = orders[orderId];
-        return (o.owner, o.tick, o.zeroForOne, o.active, o.amountIn, o.amountOut, o.filledIn, o.filledOut);
+        return (o.owner, o.tick, o.zeroForOne, o.active, o.amountIn, o.amountOut, o.filledIn, o.filledOut, o.poolKey);
     }
 
     function getOrderCount(PoolId poolId, int24 tick, bool zeroForOne) external view returns (uint256) {

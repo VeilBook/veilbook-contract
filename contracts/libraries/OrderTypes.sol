@@ -7,31 +7,7 @@ import {euint64} from "@fhevm/solidity/lib/FHE.sol";
 
 library OrderTypes {
 
-    /**
-     * @notice A confidential limit order
-     *
-     * Example:
-     *   Seller (zeroForOne=false): deposits 1 ETH (currency0)
-     *     amountIn  = 1 ETH    (encrypted — what they locked)
-     *     amountOut = computed from tick price (encrypted — what they expect back)
-     *
-     *   Buyer (zeroForOne=true): deposits 2000 USDC (currency1)
-     *     amountIn  = 2000 USDC (encrypted — what they locked)
-     *     amountOut = computed from tick price (encrypted — what they expect back)
-     *
-     * amountOut is computed on-chain in placeOrder() from TickMath.getSqrtPriceAtTick(tick)
-     * User only needs to encrypt amountIn — contract derives amountOut deterministically.
-     *
-     * Decryption model (Zama fhEVM):
-     *   Plaintext NEVER touches the contract during settlement.
-     *   User decrypts filledOut client-side via Relayer + KMS → passes to claimFill().
-     *   PoolEncryptedToken.burn() enforces balance on-chain.
-     *
-     * Why euint64:
-     *   amountOut = amountIn * price
-     *   e.g. 1e18 (1 ETH wei) * 2000 = 2e21 — overflows euint64 (max ~1.8e19)
-     *   euint64 (max ~3.4e38) handles this comfortably.
-     */
+  
     struct LimitOrder {
         // -- public --
         address owner;

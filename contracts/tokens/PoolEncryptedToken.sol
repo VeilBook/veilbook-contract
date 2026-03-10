@@ -6,21 +6,7 @@ import {FHE, euint64} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-/**
- * @title PoolEncryptedToken
- * @notice Encrypted token for a specific pool and currency, extending ERC7984
- * @dev Minimal extension of ERC7984 that only adds hook-controlled minting/burning
- *
- * ERC7984 already provides:
- * - confidentialTransfer() - transfer encrypted amounts
- * - confidentialTransferFrom() - operator transfers
- * - confidentialBalanceOf() - get encrypted balance
- * - _mint(), _burn(), _transfer() - internal functions
- *
- * We only add:
- * - Hook-only mint/burn functions
- * - Pool/currency metadata
- */
+
 contract PoolEncryptedToken is ZamaEthereumConfig, ERC7984, Ownable2Step {
     // =============================================================
     //                      STATE VARIABLES
