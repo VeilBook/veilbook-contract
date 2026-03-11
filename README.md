@@ -64,7 +64,7 @@ When a swap executes through the pool, `afterSwap` loops through resting orders 
 | SLR (Solaris) | `0x2f1b32866FFF6c5c48324806A94a3766cF69861D` |
 | ATH (Aether) | `0x3dC4270317C33873538EfBE05F22711F33187FEa` |
 | VTX (Vortex) | `0x3C8330c0A975b77bc9d809b75d32ACee49C64cc9` |
-| ZTA | `0xBce34969854a0950788f248D18B997b8b05798F9` |
+| ZTA (Zeta) | `0xBce34969854a0950788f248D18B997b8b05798F9` |
 
 ### Hook Deployment
 
