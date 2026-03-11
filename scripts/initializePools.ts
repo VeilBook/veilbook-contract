@@ -5,11 +5,11 @@ const POOL_MANAGER = "0x19380Fd31d8044fB3349d9eaEFfF779Bf41f885D";
 const USDC = "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d";
 
 const TOKEN0s = [
-  { symbol: "NBL", address: "" },
-  { symbol: "SLR", address: "" },
-  { symbol: "ATH", address: "" },
-  { symbol: "VTX", address: "" },
-  { symbol: "ZTA", address: "" },
+  { symbol: "NBL", address: "0x5EDB776E0e8324609276De545118E5f4ef0e820B" },
+  { symbol: "SLR", address: "0x2f1b32866FFF6c5c48324806A94a3766cF69861D" },
+  { symbol: "ATH", address: "0x3dC4270317C33873538EfBE05F22711F33187FEa" },
+  { symbol: "VTX", address: "0x3C8330c0A975b77bc9d809b75d32ACee49C64cc9" },
+  { symbol: "ZTA", address: "0xBce34969854a0950788f248D18B997b8b05798F9" },
 ];
 
 const TICK_SPACING = 60;
@@ -76,42 +76,5 @@ main().catch(console.error);
 // VeilBook Hook deployed at: 0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040
 
 
-[
-  {
-    "currency0": "",
-    "currency1": "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040"
-  },
-  {
-    "currency0": "",
-    "currency1": "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040"
-  },
-  {
-    "currency0": "",
-    "currency1": "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040"
-  },
-  {
-    "currency0": "",
-    "currency1": "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040"
-  },
-  {
-    "currency0": "",
-    "currency1": "0xFf191a477C6aa6e0d0176Ed9711c6A66a68a510d",
-    "fee": 3000,
-    "tickSpacing": 60,
-    "hooks": "0x67CbE7937E20Af24fBcc8Be354A5b4B5601D5040"
-  }
-]
 
 
